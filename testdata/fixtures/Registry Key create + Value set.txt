@@ -1,0 +1,40 @@
+query = 
+        LET ParseDetails(Details) = if(condition=Details =~ "[QD]WORD",
+        then=str(str=atoi(string=parse_string_with_regex(string=Details,
+           regex='''(0x[0-9a-f]+)\)$''').g1)),
+        else=Details)
+
+        LET NormalizeHive(Path) = regex_transform(
+            key="hives", map=dict(
+              `^HKCR`="HKEY_CLASSES_ROOT", `^HKCU`="HKEY_CURRENT_USER",
+              `^HKLM`="HKEY_LOCAL_MACHINE", `^HKU`="HKEY_USERS"
+            ), source=Path)
+
+        LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
+        LET RegInfo = SELECT *,
+          get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
+          ParseDetails(Details=EventData.Details) AS ValueData
+        FROM SysmonGenerator
+        WHERE System.EventID.Value in (12, 13, 14)
+        
+SELECT EventData.UtcTime,EventData.EventType,EventData.Image,EventData.TargetObject,EventData.Details,'privilege_escalation_rogue_windir_environment_var.toml' AS Detection FROM RegInfo
+WHERE NormalizeHive(Path=EventData.TargetObject) =~ 'HKEY_USERS\\\\.*\\\\Environment\\\\windir|HKEY_USERS\\\\.*\\\\Environment\\\\systemroot' 
+
+output = [][][][][][
+ {
+  "EventData.UtcTime": "2019-08-03 09:46:49.347",
+  "EventData.EventType": "DeleteValue",
+  "EventData.Image": "C:\\Windows\\explorer.exe",
+  "EventData.TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+  "EventData.Details": null,
+  "Detection": "privilege_escalation_rogue_windir_environment_var.toml"
+ },
+ {
+  "EventData.UtcTime": "2019-08-03 09:46:48.692",
+  "EventData.EventType": "SetValue",
+  "EventData.Image": "C:\\Windows\\explorer.exe",
+  "EventData.TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+  "EventData.Details": "\"C:\\Windows\\system32\\cmd.exe\"",
+  "Detection": "privilege_escalation_rogue_windir_environment_var.toml"
+ }
+]
