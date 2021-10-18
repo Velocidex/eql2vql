@@ -21,14 +21,22 @@ class EVTXTestSuite:
         "sample": "testdata/EVTX-ATTACK-SAMPLES/Sysmon_UACME_34.evtx",
     }]
 
-    def RunTest(self, tests=None, update=False):
-        for test in self.TEST_CASES:
-            testutils.RunTestWithProvider(
-                test["name"], test["rule"], test["sample"],
-                providers.SysmonEVTXLogProvider,
-                update=update)
+    provider = providers.SysmonEVTXLogProvider
 
-class SecurityDatasetTestSuite:
+    def RunTest(self, tests=None, update=False):
+        failures = []
+        try:
+            for test in self.TEST_CASES:
+                testutils.RunTestWithProvider(
+                    test["name"], test["rule"], test["sample"],
+                    self.provider, update=update)
+        except Exception as e:
+            failures.append(e)
+
+        if failures:
+            raise failures
+
+class SecurityDatasetTestSuite(EVTXTestSuite):
     TEST_CASES = [{
         "name": "ProcessRule1",
         "rule": "testdata/testcases/lateral_movement_service_control_spawned_script_int.toml",
@@ -43,12 +51,7 @@ class SecurityDatasetTestSuite:
         "sample": "testdata/Security-Datasets/psh_cmstp_execution_bypassuac_2020-10-2201543213.json",
     }]
 
-    def RunTest(self, tests=None, update=False):
-        for test in self.TEST_CASES:
-            testutils.RunTestWithProvider(
-                test["name"], test["rule"], test["sample"],
-                providers.SecurityDatasetTestProvider,
-                update=update)
+    provider = providers.SecurityDatasetTestProvider
 
 
 if __name__ == "__main__":

@@ -1,0 +1,33 @@
+name: Test
+on: [pull_request]
+jobs:
+  build:
+    name: Windows Test
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Set up Go 1.17
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17
+      id: go
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+
+    - name: Checkout Velociraptor
+      run: |
+        curl -o /tmp/velociraptor https://storage.googleapis.com/releases.velocidex.com/velociraptor/velociraptor-v0.6.2-rc1-linux-amd64
+        chmox +x /tmp/velociraptor
+
+    - name: Test
+      shell: bash
+      if: always()
+      env:
+        VELOCIRAPTOR: /tmp/velociraptor
+      run: |
+        python3 parser/eql2vql_test.py --update
+
+    - uses: actions/upload-artifact@master
+      if: always()
+      with:
+        name: fixtures
+        path: testdata/fixtures/

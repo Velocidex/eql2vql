@@ -49,10 +49,12 @@ def check_fixture(name, result, update=False):
         raise e
 
     if fixture_data != new_data:
-        print("Fixture failed for " + name)
         if update:
             print("Updating fixture %s" % name)
             with open(filename, "w+") as fd:
                 fd.write(new_data)
+
+        raise RuntimeException("Fixture failed for " + name)
+
     else:
         print("Test %s PASSED" % name)
