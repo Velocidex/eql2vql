@@ -263,7 +263,7 @@ WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
             handler = getattr(self, t)
         except AttributeError:
             print("No handler for %s" % t)
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             return ""
 
         return handler(ast)
@@ -398,7 +398,6 @@ WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
         if name == "length":
             return " len(list="+ self.Visit(arguments[0]) + ") "
 
-        import pdb; pdb.set_trace()
         raise IOError("Unknown FunctionCall " + name)
 
     def IsNotNull(self, ast):
