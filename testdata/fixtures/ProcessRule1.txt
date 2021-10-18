@@ -1,0 +1,325 @@
+artifact = name: Windows.Sysmon.Detection
+description: |
+  Automated artifact for detection based on EQL.
+
+  process where event.type == "start" and
+    (process.name : "sc.exe" or process.pe.original_file_name == "sc.exe") and
+    process.parent.name : ("cmd.exe", "wscript.exe", "rundll32.exe", "regsvr32.exe",
+                           "wmic.exe", "mshta.exe","powershell.exe", "pwsh.exe") and
+    process.args:("config", "create", "start", "delete", "stop", "pause") and
+    /* exclude SYSTEM SID - look for service creations by non-SYSTEM user */
+    not user.id : "S-1-5-18"
+parameters:
+- name: SecurityEventsJSONPath
+  description: Path to the security events file.
+  default: Security-Datasets/aptsimulator_cobaltstrike_2021-06-11T21081492.json
+sources:
+- query: |-
+    LET Events = SELECT parse_json(data=Line) AS EventData
+    FROM parse_lines(filename=SecurityEventsJSONPath)
+
+    LET SysmonGenerator <= generate(name="Sysmon",
+    query={
+     SELECT
+      dict(
+         Provider=dict(
+            Name=EventData.SourceName,
+            Guid=EventData.ProviderGuid),
+         EventID=dict(
+            Value=EventData.EventID
+         ),
+         Level=EventData.Level,
+         Task=EventData.Task,
+         TimeCreated=dict(
+           SystemTime=timestamp(string=EventData.TimeCreated).Unix
+         ),
+         Execution=dict(
+           -- ProcessId=TargetProcessId
+         ),
+         Channel=EventData.Channel,
+         Computer=EventData.Hostname,
+         Security=dict(
+           UserID="" -- This seems to be missing?
+         )
+        ) AS System, EventData,
+      EventData.Message AS Message
+      FROM Events
+    })
+
+    LET ProcessTypes <= dict(`1`="start", `5`="stop")
+
+    LET ProcessInfo = SELECT *,
+      get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
+    FROM SysmonGenerator
+    WHERE System.EventID.Value in (1, 5)
+
+    SELECT EventData || UserData AS _EventData,
+           System AS _System,
+           EventData.UtcTime AS UtcTime,
+           EventData.Image AS Image,
+           EventData.ParentImage AS ParentImage,
+           EventData.CommandLine AS CommandLine,
+           EventData.User AS User,
+           'lateral_movement_service_control_spawned_script_int.toml' AS Detection
+    FROM ProcessInfo
+    WHERE  ( event_type = 'start'
+      AND  ( EventData.Image =~ 'sc\\.exe' OR EventData.OriginalFileName = 'sc.exe' ) 
+      AND EventData.ParentImage =~ 'cmd\\.exe|wscript\\.exe|rundll32\\.exe|regsvr32\\.exe|wmic\\.exe|mshta\\.exe|powershell\\.exe|pwsh\\.exe'
+      AND EventData.CommandLine =~ 'config|create|start|delete|stop|pause'
+      AND  NOT EventData.User =~ 'S-1-5-18' )
+
+
+output = [
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.208Z",
+   "@timestamp": "2021-06-11T09:07:41.208Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.204\r\nProcessGuid: {e2c04bb9-08dd-60c4-d6b3-400100000000}\r\nProcessId: 6116\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand\r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.204",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-d6b3-400100000000}",
+   "ProcessId": "6116",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.204",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+ },
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.225Z",
+   "@timestamp": "2021-06-11T09:07:41.225Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.224\r\nProcessGuid: {e2c04bb9-08dd-60c4-7eb5-400100000000}\r\nProcessId: 8840\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  start tbbd05 \r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.224",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-7eb5-400100000000}",
+   "ProcessId": "8840",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  start tbbd05 ",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.224",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  start tbbd05 ",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+ },
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.350Z",
+   "@timestamp": "2021-06-11T09:07:41.350Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.348\r\nProcessGuid: {e2c04bb9-08dd-60c4-d3bf-400100000000}\r\nProcessId: 1440\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  stop tbbd05 \r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.348",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-d3bf-400100000000}",
+   "ProcessId": "1440",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  stop tbbd05 ",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.348",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  stop tbbd05 ",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+ },
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.365Z",
+   "@timestamp": "2021-06-11T09:07:41.365Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.363\r\nProcessGuid: {e2c04bb9-08dd-60c4-5ac1-400100000000}\r\nProcessId: 5136\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  delete tbbd05 \r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.363",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-5ac1-400100000000}",
+   "ProcessId": "5136",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  delete tbbd05 ",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.363",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  delete tbbd05 ",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+ }
+]
