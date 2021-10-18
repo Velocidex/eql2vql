@@ -1,7 +1,6 @@
 import eql2vql
 import run_query
 import os.path
-import yaml
 import argparse
 import collections
 import tempfile
