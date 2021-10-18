@@ -18,9 +18,11 @@ jobs:
         curl -o /tmp/velociraptor https://storage.googleapis.com/releases.velocidex.com/velociraptor/velociraptor-v0.6.2-rc1-linux-amd64
         chmod +x /tmp/velociraptor
 
+    - uses: actions/setup-python@v1
     - name: Install Python
-      run: |
-        pip install -r requirements.txt
+      uses: BSFishy/pip-action@v1
+      with:
+        requirements: requirements.txt
 
     - name: Test
       shell: bash
