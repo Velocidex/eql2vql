@@ -2,7 +2,7 @@ name: Test
 on: [pull_request]
 jobs:
   build:
-    name: Windows Test
+    name: Test
     runs-on: ubuntu-18.04
     steps:
     - name: Set up Go 1.17
@@ -16,7 +16,7 @@ jobs:
     - name: Checkout Velociraptor
       run: |
         curl -o /tmp/velociraptor https://storage.googleapis.com/releases.velocidex.com/velociraptor/velociraptor-v0.6.2-rc1-linux-amd64
-        chmox +x /tmp/velociraptor
+        chmod +x /tmp/velociraptor
 
     - name: Test
       shell: bash
