@@ -1,0 +1,143 @@
+artifact = name: Windows.Sysmon.Detection
+description: |
+  Automated artifact for detection based on EQL.
+
+  registry where registry.path : ("HKEY_USERS\\*\\Environment\\windir", "HKEY_USERS\\*\\Environment\\systemroot")
+parameters:
+- name: EVTXGlob
+  description: Glob to search for EVTX files.
+  default: C:\Windows\System32\Winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx
+sources:
+- query: |-
+    LET SysmonGenerator <= generate(name="Sysmon",
+    query={
+      SELECT * FROM foreach(row={SELECT FullPath FROM glob(globs=EVTXGlob)},
+         query={
+          SELECT *
+          FROM parse_evtx(filename=FullPath)
+        })
+    })
+
+    LET ParseDetails(Details) = if(condition=Details =~ "[QD]WORD",
+    then=str(str=atoi(string=parse_string_with_regex(string=Details,
+       regex='''(0x[0-9a-f]+)\)$''').g1)),
+    else=Details)
+
+    LET NormalizeHive(Path) = regex_transform(
+        key="hives", map=dict(
+          `^HKCR`="HKEY_CLASSES_ROOT", `^HKCU`="HKEY_CURRENT_USER",
+          `^HKLM`="HKEY_LOCAL_MACHINE", `^HKU`="HKEY_USERS"
+        ), source=Path)
+
+    LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
+    LET RegInfo = SELECT *,
+      get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
+      ParseDetails(Details=EventData.Details) AS ValueData
+    FROM SysmonGenerator
+    WHERE System.EventID.Value in (12, 13, 14)
+
+    SELECT EventData || UserData AS _EventData,
+           System AS _System,
+           EventData.UtcTime AS UtcTime,
+           EventData.EventType AS EventType,
+           EventData.Image AS Image,
+           EventData.TargetObject AS TargetObject,
+           EventData.Details AS Details,
+           'privilege_escalation_rogue_windir_environment_var.toml' AS Detection
+    FROM RegInfo
+    WHERE NormalizeHive(Path=EventData.TargetObject) =~ 'HKEY_USERS\\\\.*\\\\Environment\\\\windir|HKEY_USERS\\\\.*\\\\Environment\\\\systemroot'
+
+
+output = [
+ {
+  "_EventData": {
+   "RuleName": "PrivEsc - UAC bypass UACME-34",
+   "EventType": "DeleteValue",
+   "UtcTime": "2019-08-03 09:46:49.347",
+   "ProcessGuid": "747F3D96-5808-5D45-0000-00106CDC3E00",
+   "ProcessId": 924,
+   "Image": "C:\\Windows\\explorer.exe",
+   "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir"
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "5770385F-C22A-43E0-BF4C-06F5698FFBD9"
+   },
+   "EventID": {
+    "Value": 12
+   },
+   "Version": 2,
+   "Level": 4,
+   "Task": 12,
+   "Opcode": 0,
+   "Keywords": 9223372036854775808,
+   "TimeCreated": {
+    "SystemTime": 1564825609.436856
+   },
+   "EventRecordID": 5135,
+   "Correlation": {},
+   "Execution": {
+    "ProcessID": 2780,
+    "ThreadID": 3676
+   },
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "MSEDGEWIN10",
+   "Security": {
+    "UserID": "S-1-5-18"
+   }
+  },
+  "UtcTime": "2019-08-03 09:46:49.347",
+  "EventType": "DeleteValue",
+  "Image": "C:\\Windows\\explorer.exe",
+  "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+  "Details": null,
+  "Detection": "privilege_escalation_rogue_windir_environment_var.toml"
+ },
+ {
+  "_EventData": {
+   "RuleName": "PrivEsc - UAC bypass UACME-34",
+   "EventType": "SetValue",
+   "UtcTime": "2019-08-03 09:46:48.692",
+   "ProcessGuid": "747F3D96-5808-5D45-0000-00106CDC3E00",
+   "ProcessId": 924,
+   "Image": "C:\\Windows\\explorer.exe",
+   "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+   "Details": "\"C:\\Windows\\system32\\cmd.exe\""
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "5770385F-C22A-43E0-BF4C-06F5698FFBD9"
+   },
+   "EventID": {
+    "Value": 13
+   },
+   "Version": 2,
+   "Level": 4,
+   "Task": 13,
+   "Opcode": 0,
+   "Keywords": 9223372036854776000,
+   "TimeCreated": {
+    "SystemTime": 1564825608.726304
+   },
+   "EventRecordID": 5132,
+   "Correlation": {},
+   "Execution": {
+    "ProcessID": 2780,
+    "ThreadID": 3676
+   },
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "MSEDGEWIN10",
+   "Security": {
+    "UserID": "S-1-5-18"
+   }
+  },
+  "UtcTime": "2019-08-03 09:46:48.692",
+  "EventType": "SetValue",
+  "Image": "C:\\Windows\\explorer.exe",
+  "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+  "Details": "\"C:\\Windows\\system32\\cmd.exe\"",
+  "Detection": "privilege_escalation_rogue_windir_environment_var.toml"
+ }
+]

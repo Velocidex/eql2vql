@@ -12,7 +12,7 @@ for every raw event to be transformed prior to matching, as VQL
 operates directly on the raw fields.
 
 """
-
+import textwrap
 import json
 
 class UnknownCategory(Exception):
@@ -35,6 +35,31 @@ def to_regex(expr):
     res = res.replace("+", "\\\\+")
     res = res.replace(".", "\\\\.")
     return res.replace("*", ".*")
+
+
+ProcessColumns = [
+    "EventData.UtcTime",
+    "EventData.Image",
+    "EventData.ParentImage",
+    "EventData.CommandLine",
+    "EventData.User",
+]
+
+RegistryColumns = [
+    "EventData.UtcTime",
+    "EventData.EventType",
+    "EventData.Image",
+    "EventData.TargetObject",
+    "EventData.Details",
+]
+
+DNSColumns = [
+    "EventData.UtcTime",
+    "EventData.QueryName",
+    "EventData.Image",
+    "protocol",
+]
+
 
 class SysmonMatcher:
     # The VQL definitions of the streams we will need. These will
@@ -208,14 +233,25 @@ class SysmonMatcher:
         # detection query.
         return self.CollectorQuery() + self.AnalysisQuery()
 
+    def getColumns(self):
+        result = ["EventData || UserData AS _EventData", "System AS _System"]
+        for c in self.columns:
+            if "EventData" in c:
+                c = c + " AS " + c.split(".")[-1]
+            result.append(c)
+        return result
+
     def AnalysisQuery(self):
         """ Return the analysis query for the rule."""
-        columns = self.columns[:]
+        columns = self.getColumns()
         columns.append(self.detection + " AS Detection")
 
-        return "\n".join(self.preamble) + """
-SELECT %s FROM %s
-WHERE %s """ % (",".join(columns), self.source, self.where)
+        preambles = [textwrap.dedent(x) for x in self.preamble]
+
+        return "\n".join(preambles) + """
+SELECT %s
+FROM %s
+WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
 
     def Visit(self, ast):
         if isinstance(ast, str):
@@ -246,6 +282,7 @@ WHERE %s """ % (",".join(columns), self.source, self.where)
         if event_type == "process":
             self.source = "ProcessInfo"
             self.preamble.append(self.Preamble["process"])
+            self.SetColumns(ProcessColumns)
 
         elif event_type == "library":
             self.source = "LibraryInfo"
@@ -258,10 +295,12 @@ WHERE %s """ % (",".join(columns), self.source, self.where)
         elif event_type == "registry":
             self.source = "RegInfo"
             self.preamble.append(self.Preamble["registry"])
+            self.SetColumns(RegistryColumns)
 
         elif event_type == "network":
             self.source = "NetworkInfo"
             self.preamble.append(self.Preamble["network"])
+            self.SetColumns(DNSColumns)
 
         else:
             raise UnknownCategory(

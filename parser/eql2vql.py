@@ -3,6 +3,9 @@ import argparse
 import toml
 import sysmon
 import os
+import sys
+import providers
+import dumper
 
 parser = argparse.ArgumentParser(
     description='Convert EQL detection rules to a VQL artifact.')
@@ -10,7 +13,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('files', metavar='N', type=str, nargs='+',
                     help='EQL TOML files to parse')
 
-def ParseRule(filename):
+def GetAnalyzer(filename):
     with open(filename) as fd:
         description = toml.loads(fd.read())
         query = description["rule"]["query"]
@@ -21,10 +24,18 @@ def ParseRule(filename):
 
         return sysmon_engine
 
+def BuildArtifact(files, provider=providers.SysmonEVTXLogProvider):
+    analyzers = []
+
+    for f in files:
+        sysmon_engine = GetAnalyzer(f)
+        analyzers.append(sysmon_engine)
+
+    p = provider(analyzers)
+    artifact = p.Render()
+    return dumper.DumpAsYaml(artifact)
+
 
 if __name__ == "__main__":
     args = parser.parse_args()
-
-    for f in args.files:
-        sysmon_engine = ParseRule(f)
-        print(sysmon_engine.Query())
+    print(BuildArtifact(args.files))
