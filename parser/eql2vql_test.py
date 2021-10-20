@@ -33,7 +33,7 @@ class EVTXTestSuite:
             failures.append(e)
 
         if failures:
-            raise failures
+            raise failures[0]
 
 class SecurityDatasetTestSuite(EVTXTestSuite):
     TEST_CASES = [{
