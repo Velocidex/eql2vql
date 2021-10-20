@@ -22,7 +22,7 @@ def RunTestWithProvider(name, rule, sample, provider,
     print("Testing %s with test file %s" % (name, sample))
 
     with tempfile.TemporaryDirectory() as tmpdirname:
-        if testdir != "":
+        if testdir:
             tmpdirname = testdir
 
         with open(os.path.join(tmpdirname, "test.yaml"), "w+") as fd:
