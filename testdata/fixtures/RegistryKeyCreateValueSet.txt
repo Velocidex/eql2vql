@@ -72,7 +72,7 @@ output = [
    "Level": 4,
    "Task": 13,
    "Opcode": 0,
-   "Keywords": 9223372036854776000,
+   "Keywords": 9223372036854775808,
    "TimeCreated": {
     "SystemTime": 1564825608.726304
    },
