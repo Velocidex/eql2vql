@@ -98,8 +98,6 @@ class SecurityDatasetTestProvider(SysmonEVTXLogProvider):
     LET Events = SELECT parse_json(data=Line) AS EventData
     FROM parse_lines(filename=SecurityEventsJSONPath)
 
-    SELECT EventData.EventID FROM Events
-
     LET SysmonGenerator <= generate(name="Sysmon",
     query={
      SELECT
