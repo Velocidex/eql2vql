@@ -10,6 +10,8 @@ import testutils
 parser = argparse.ArgumentParser(description='Run test suite.')
 parser.add_argument('tests', nargs='*', help='Tests to run')
 parser.add_argument('--update', action="store_true", help='Update fixtures')
+parser.add_argument('--verbose', action="store_true", help='Verbose')
+parser.add_argument('--testdir', help='Store generated yaml in this directory')
 
 class EVTXTestSuite:
     """Test specific EQL queries one at the time."""
@@ -22,13 +24,18 @@ class EVTXTestSuite:
 
     provider = providers.SysmonEVTXLogProvider
 
-    def RunTest(self, tests=None, update=False):
+    def RunTest(self, tests=None, update=False,
+                verbose=False, testdir=None):
         failures = []
         try:
             for test in self.TEST_CASES:
+                if tests and test['name'] not in tests:
+                    continue
+
                 testutils.RunTestWithProvider(
                     test["name"], test["rule"], test["sample"],
-                    self.provider, update=update)
+                    self.provider, update=update, verbose=verbose,
+                    testdir=testdir)
         except Exception as e:
             failures.append(e)
 
@@ -56,5 +63,9 @@ class SecurityDatasetTestSuite(EVTXTestSuite):
 if __name__ == "__main__":
     args = parser.parse_args()
 
-    SecurityDatasetTestSuite().RunTest(args.tests, args.update)
-    EVTXTestSuite().RunTest(args.tests, args.update)
+    SecurityDatasetTestSuite().RunTest(args.tests, args.update,
+                                       verbose=args.verbose,
+                                       testdir=args.testdir)
+    EVTXTestSuite().RunTest(args.tests, args.update,
+                            verbose=args.verbose,
+                            testdir=args.testdir)

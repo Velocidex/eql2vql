@@ -19,7 +19,7 @@ def run_query(query, env=None, format="jsonl"):
     return subprocess.check_output(args)
 
 
-def collect_artifact(artifact, directory, env=None, format="jsonl"):
+def collect_artifact(artifact, directory, env=None, format="jsonl", verbose=False):
     try:
         velociraptor_exe = os.environ["VELOCIRAPTOR"]
     except KeyError:
@@ -34,6 +34,12 @@ def collect_artifact(artifact, directory, env=None, format="jsonl"):
         args.append("--args")
         args.append(k + "=" + v)
 
-    # print("Calling %s" % (args,))
+    if verbose:
+        parts = []
+        for part in args:
+            if " " in part:
+                part = '"' + part + '"'
+            parts.append(part)
+        print(" ".join(parts))
 
     return subprocess.check_output(args)
