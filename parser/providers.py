@@ -98,7 +98,6 @@ class SecurityDatasetTestProvider(SysmonEVTXLogProvider):
     LET Events = SELECT parse_json(data=Line) AS EventData
     FROM parse_lines(filename=SecurityEventsJSONPath)
 
-    /*
     LET SysmonGenerator <= generate(name="Sysmon",
     query={
      SELECT
@@ -126,31 +125,4 @@ class SecurityDatasetTestProvider(SysmonEVTXLogProvider):
       EventData.Message AS Message
       FROM Events
     })
-    */
-
-    LET SysmonGenerator =      SELECT
-      dict(
-         Provider=dict(
-            Name=EventData.SourceName,
-            Guid=EventData.ProviderGuid),
-         EventID=dict(
-            Value=EventData.EventID
-         ),
-         Level=EventData.Level,
-         Task=EventData.Task,
-         TimeCreated=dict(
-           SystemTime=timestamp(string=EventData.TimeCreated).Unix
-         ),
-         Execution=dict(
-           -- ProcessId=TargetProcessId
-         ),
-         Channel=EventData.Channel,
-         Computer=EventData.Hostname,
-         Security=dict(
-           UserID="" -- This seems to be missing?
-         )
-        ) AS System, EventData,
-      EventData.Message AS Message
-      FROM Events
-
     """
