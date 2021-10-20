@@ -54,7 +54,7 @@ def check_fixture(name, result, update=False):
             with open(filename, "w+") as fd:
                 fd.write(new_data)
 
-        raise RuntimeException("Fixture failed for " + name)
+        raise RuntimeError("Fixture failed for " + name)
 
     else:
         print("Test %s PASSED" % name)
