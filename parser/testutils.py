@@ -14,13 +14,17 @@ import run_query
 
 FIXTURES = "testdata/fixtures/"
 
-def RunTestWithProvider(name, rule, sample, provider, update=False):
+def RunTestWithProvider(name, rule, sample, provider,
+                        update=False, verbose=False, testdir=""):
     result = []
 
     artifact = eql2vql.BuildArtifact([rule], provider=provider)
     print("Testing %s with test file %s" % (name, sample))
 
     with tempfile.TemporaryDirectory() as tmpdirname:
+        if testdir:
+            tmpdirname = testdir
+
         with open(os.path.join(tmpdirname, "test.yaml"), "w+") as fd:
             fd.write(artifact)
 
@@ -30,7 +34,7 @@ def RunTestWithProvider(name, rule, sample, provider, update=False):
             "Windows.Sysmon.Detection",
             tmpdirname, env={
                 arg_name: os.path.abspath(sample)
-            })
+            }, verbose=verbose)
 
         result.append("output = %s" % str(output, "utf8"))
         check_fixture(name, result, update=update)
@@ -49,10 +53,12 @@ def check_fixture(name, result, update=False):
         raise e
 
     if fixture_data != new_data:
-        print("Fixture failed for " + name)
         if update:
             print("Updating fixture %s" % name)
             with open(filename, "w+") as fd:
                 fd.write(new_data)
+
+        raise RuntimeError("Fixture failed for " + name)
+
     else:
         print("Test %s PASSED" % name)

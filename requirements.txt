@@ -1,0 +1,6 @@
+eql==0.9.9
+pytoml==0.1.21
+toml==0.10.0
+tomli==1.2.1
+ruamel.yaml==0.17.16
+ruamel.yaml.clib==0.2.6

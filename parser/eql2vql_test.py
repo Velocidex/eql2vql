@@ -1,7 +1,6 @@
 import eql2vql
 import run_query
 import os.path
-import yaml
 import argparse
 import collections
 import tempfile
@@ -11,6 +10,8 @@ import testutils
 parser = argparse.ArgumentParser(description='Run test suite.')
 parser.add_argument('tests', nargs='*', help='Tests to run')
 parser.add_argument('--update', action="store_true", help='Update fixtures')
+parser.add_argument('--verbose', action="store_true", help='Verbose')
+parser.add_argument('--testdir', help='Store generated yaml in this directory')
 
 class EVTXTestSuite:
     """Test specific EQL queries one at the time."""
@@ -21,14 +22,27 @@ class EVTXTestSuite:
         "sample": "testdata/EVTX-ATTACK-SAMPLES/Sysmon_UACME_34.evtx",
     }]
 
-    def RunTest(self, tests=None, update=False):
-        for test in self.TEST_CASES:
-            testutils.RunTestWithProvider(
-                test["name"], test["rule"], test["sample"],
-                providers.SysmonEVTXLogProvider,
-                update=update)
+    provider = providers.SysmonEVTXLogProvider
 
-class SecurityDatasetTestSuite:
+    def RunTest(self, tests=None, update=False,
+                verbose=False, testdir=None):
+        failures = []
+        try:
+            for test in self.TEST_CASES:
+                if tests and test['name'] not in tests:
+                    continue
+
+                testutils.RunTestWithProvider(
+                    test["name"], test["rule"], test["sample"],
+                    self.provider, update=update, verbose=verbose,
+                    testdir=testdir)
+        except Exception as e:
+            failures.append(e)
+
+        if failures:
+            raise failures[0]
+
+class SecurityDatasetTestSuite(EVTXTestSuite):
     TEST_CASES = [{
         "name": "ProcessRule1",
         "rule": "testdata/testcases/lateral_movement_service_control_spawned_script_int.toml",
@@ -43,16 +57,15 @@ class SecurityDatasetTestSuite:
         "sample": "testdata/Security-Datasets/psh_cmstp_execution_bypassuac_2020-10-2201543213.json",
     }]
 
-    def RunTest(self, tests=None, update=False):
-        for test in self.TEST_CASES:
-            testutils.RunTestWithProvider(
-                test["name"], test["rule"], test["sample"],
-                providers.SecurityDatasetTestProvider,
-                update=update)
+    provider = providers.SecurityDatasetTestProvider
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
 
-    SecurityDatasetTestSuite().RunTest(args.tests, args.update)
-    EVTXTestSuite().RunTest(args.tests, args.update)
+    SecurityDatasetTestSuite().RunTest(args.tests, args.update,
+                                       verbose=args.verbose,
+                                       testdir=args.testdir)
+    EVTXTestSuite().RunTest(args.tests, args.update,
+                            verbose=args.verbose,
+                            testdir=args.testdir)
