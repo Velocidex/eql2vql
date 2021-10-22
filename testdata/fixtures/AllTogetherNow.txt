@@ -1,0 +1,532 @@
+artifact = name: Windows.Sysmon.Detection
+description: |
+  Automated artifact for detection based on EQL.
+
+  ### Service Control Spawned via Script Interpreter
+  ```
+  process where event.type == "start" and
+    (process.name : "sc.exe" or process.pe.original_file_name == "sc.exe") and
+    process.parent.name : ("cmd.exe", "wscript.exe", "rundll32.exe", "regsvr32.exe",
+                           "wmic.exe", "mshta.exe","powershell.exe", "pwsh.exe") and
+    process.args:("config", "create", "start", "delete", "stop", "pause") and
+    /* exclude SYSTEM SID - look for service creations by non-SYSTEM user */
+    not user.id : "S-1-5-18"
+  ```
+
+  ### ImageLoad via Windows Update Auto Update Client
+  ```
+  process where event.type in ("start", "process_started") and
+    (process.pe.original_file_name == "wuauclt.exe" or process.name : "wuauclt.exe") and
+     /* necessary windows update client args to load a dll */
+     process.args : "/RunHandlerComServer" and process.args : "/UpdateDeploymentProvider" and
+     /* common paths writeable by a standard user where the target DLL can be placed */
+     process.args : ("C:\\Users\\*.dll", "C:\\ProgramData\\*.dll", "C:\\Windows\\Temp\\*.dll", "C:\\Windows\\Tasks\\*.dll")
+  ```
+
+  ### Connection to Commonly Abused Free SSL Certificate Providers
+  ```
+  network where network.protocol == "dns" and
+    /* Add new free SSL certificate provider domains here */
+    dns.question.name : ("*letsencrypt.org", "*.sslforfree.com", "*.zerossl.com", "*.freessl.org") and
+
+    /* Native Windows process paths that are unlikely to have network connections to domains secured using free SSL certificates */
+     process.executable : ("C:\\Windows\\System32\\*.exe",
+                          "C:\\Windows\\System\\*.exe",
+                        "C:\\Windows\\SysWOW64\\*.exe",
+                    "C:\\Windows\\Microsoft.NET\\Framework*\\*.exe",
+                    "C:\\Windows\\explorer.exe",
+                    "C:\\ProgramData\\Microsoft\\Windows Defender\\*\\MsMpEng.exe",
+                    "C:\\Windows\\notepad.exe") and
+
+    /* Insert noisy false positives here */
+    not process.name : ("svchost.exe", "MicrosoftEdge*.exe", "msedge.exe")
+  ```
+parameters:
+- name: SecurityEventsJSONPath
+  description: Path to the security events file.
+  default: Security-Datasets/aptsimulator_cobaltstrike_2021-06-11T21081492.json
+sources:
+- query: |-
+    LET Events = SELECT parse_json(data=Line) AS EventData
+    FROM parse_lines(filename=SecurityEventsJSONPath)
+
+    LET SysmonGenerator = generate(name="Sysmon",
+    query={
+    SELECT
+      dict(
+         Provider=dict(
+            Name=EventData.SourceName,
+            Guid=EventData.ProviderGuid),
+         EventID=dict(
+            Value=EventData.EventID
+         ),
+         Level=EventData.Level,
+         Task=EventData.Task,
+         TimeCreated=dict(
+           SystemTime=timestamp(string=EventData.TimeCreated).Unix
+         ),
+         Execution=dict(
+           -- ProcessId=TargetProcessId
+         ),
+         Channel=EventData.Channel,
+         Computer=EventData.Hostname,
+         Security=dict(
+           UserID="" -- This seems to be missing?
+         )
+        ) AS System, EventData,
+      EventData.Message AS Message
+      FROM Events
+    })
+
+    LET NetworkInfo = generate(name="NetworkInfo", query={
+      SELECT *, "dns" AS protocol
+      FROM SysmonGenerator
+      WHERE System.EventID.Value = 22
+    })
+
+    LET ProcessInfo = generate(name="ProcessInfo", query={
+       SELECT *,
+              get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
+       FROM SysmonGenerator
+       WHERE System.EventID.Value in (1, 5)
+    })
+
+    LET ProcessTypes <= dict(`1`="start", `5`="stop")
+
+    LET _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders = SELECT EventData || UserData AS _EventData,
+           System AS _System,
+           EventData.UtcTime AS UtcTime,
+           EventData.QueryName AS QueryName,
+           EventData.Image AS Image,
+           protocol,
+           'Connection to Commonly Abused Free SSL Certificate Providers' AS Detection
+    FROM NetworkInfo
+    WHERE  ( protocol = 'dns'
+      AND EventData.QueryName =~ '.*letsencrypt\\.org|.*\\.sslforfree\\.com|.*\\.zerossl\\.com|.*\\.freessl\\.org'
+      AND EventData.Image =~ 'C:\\\\Windows\\\\System32\\\\.*\\.exe|C:\\\\Windows\\\\System\\\\.*\\.exe|C:\\\\Windows\\\\SysWOW64\\\\.*\\.exe|C:\\\\Windows\\\\Microsoft\\.NET\\\\Framework.*\\\\.*\\.exe|C:\\\\Windows\\\\explorer\\.exe|C:\\\\ProgramData\\\\Microsoft\\\\Windows Defender\\\\.*\\\\MsMpEng\\.exe|C:\\\\Windows\\\\notepad\\.exe'
+      AND  NOT EventData.Image =~ 'svchost\\.exe|MicrosoftEdge.*\\.exe|msedge\\.exe' )
+
+    LET _ImageLoadviaWindowsUpdateAutoUpdateClient = SELECT EventData || UserData AS _EventData,
+           System AS _System,
+           EventData.UtcTime AS UtcTime,
+           EventData.Image AS Image,
+           EventData.ParentImage AS ParentImage,
+           EventData.CommandLine AS CommandLine,
+           EventData.User AS User,
+           'ImageLoad via Windows Update Auto Update Client' AS Detection
+    FROM ProcessInfo
+    WHERE  ( event_type IN ('start', 'process_started' ) 
+      AND  ( EventData.OriginalFileName = 'wuauclt.exe' OR EventData.Image =~ 'wuauclt\\.exe' ) 
+      AND EventData.CommandLine =~ '/RunHandlerComServer'
+      AND EventData.CommandLine =~ '/UpdateDeploymentProvider'
+      AND EventData.CommandLine =~ 'C:\\\\Users\\\\.*\\.dll|C:\\\\ProgramData\\\\.*\\.dll|C:\\\\Windows\\\\Temp\\\\.*\\.dll|C:\\\\Windows\\\\Tasks\\\\.*\\.dll' )
+
+    LET _ServiceControlSpawnedviaScriptInterpreter = SELECT EventData || UserData AS _EventData,
+           System AS _System,
+           EventData.UtcTime AS UtcTime,
+           EventData.Image AS Image,
+           EventData.ParentImage AS ParentImage,
+           EventData.CommandLine AS CommandLine,
+           EventData.User AS User,
+           'Service Control Spawned via Script Interpreter' AS Detection
+    FROM ProcessInfo
+    WHERE  ( event_type = 'start'
+      AND  ( EventData.Image =~ 'sc\\.exe' OR EventData.OriginalFileName = 'sc.exe' ) 
+      AND EventData.ParentImage =~ 'cmd\\.exe|wscript\\.exe|rundll32\\.exe|regsvr32\\.exe|wmic\\.exe|mshta\\.exe|powershell\\.exe|pwsh\\.exe'
+      AND EventData.CommandLine =~ 'config|create|start|delete|stop|pause'
+      AND  NOT EventData.User =~ 'S-1-5-18' )
+
+    SELECT * FROM chain(
+       _ServiceControlSpawnedviaScriptInterpreter=_ServiceControlSpawnedviaScriptInterpreter,
+       _ImageLoadviaWindowsUpdateAutoUpdateClient=_ImageLoadviaWindowsUpdateAutoUpdateClient,
+       _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders=_ConnectiontoCommonlyAbusedFreeSSLCertificateProviders,
+    async=True)
+
+
+output = [
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.208Z",
+   "@timestamp": "2021-06-11T09:07:41.208Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.204\r\nProcessGuid: {e2c04bb9-08dd-60c4-d6b3-400100000000}\r\nProcessId: 6116\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand\r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.204",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-d6b3-400100000000}",
+   "ProcessId": "6116",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.204",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "Service Control Spawned via Script Interpreter"
+ },
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.225Z",
+   "@timestamp": "2021-06-11T09:07:41.225Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.224\r\nProcessGuid: {e2c04bb9-08dd-60c4-7eb5-400100000000}\r\nProcessId: 8840\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  start tbbd05 \r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.224",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-7eb5-400100000000}",
+   "ProcessId": "8840",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  start tbbd05 ",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.224",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  start tbbd05 ",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "Service Control Spawned via Script Interpreter"
+ },
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.350Z",
+   "@timestamp": "2021-06-11T09:07:41.350Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.348\r\nProcessGuid: {e2c04bb9-08dd-60c4-d3bf-400100000000}\r\nProcessId: 1440\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  stop tbbd05 \r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.348",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-d3bf-400100000000}",
+   "ProcessId": "1440",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  stop tbbd05 ",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.348",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  stop tbbd05 ",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "Service Control Spawned via Script Interpreter"
+ },
+ {
+  "_EventData": {
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "Level": "4",
+   "Keywords": "0x8000000000000000",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Hostname": "WORKSTATION5",
+   "TimeCreated": "2021-06-11T09:07:41.365Z",
+   "@timestamp": "2021-06-11T09:07:41.365Z",
+   "EventID": 1,
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2021-06-12 01:07:41.363\r\nProcessGuid: {e2c04bb9-08dd-60c4-5ac1-400100000000}\r\nProcessId: 5136\r\nImage: C:\\Windows\\System32\\sc.exe\r\nFileVersion: 10.0.18362.1 (WinBuild.160101.0800)\r\nDescription: Service Control Manager Configuration Tool\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: sc.exe\r\nCommandLine: sc  delete tbbd05 \r\nCurrentDirectory: C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\\r\nUser: WORKSTATION5\\APT-Simulator\r\nLogonGuid: {e2c04bb9-a708-60c3-fb19-370000000000}\r\nLogonId: 0x3719FB\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF\r\nParentProcessGuid: {e2c04bb9-d0f0-60c3-48da-ec0000000000}\r\nParentProcessId: 5632\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"C:\\Windows\\system32\\cmd.exe\" ",
+   "Task": "1",
+   "RuleName": "-",
+   "UtcTime": "2021-06-12 01:07:41.363",
+   "ProcessGuid": "{e2c04bb9-08dd-60c4-5ac1-400100000000}",
+   "ProcessId": "5136",
+   "Image": "C:\\Windows\\System32\\sc.exe",
+   "FileVersion": "10.0.18362.1 (WinBuild.160101.0800)",
+   "Description": "Service Control Manager Configuration Tool",
+   "Product": "Microsoft® Windows® Operating System",
+   "Company": "Microsoft Corporation",
+   "OriginalFileName": "sc.exe",
+   "CommandLine": "sc  delete tbbd05 ",
+   "CurrentDirectory": "C:\\Users\\APT-Simulator\\Documents\\APTSimulator-master\\",
+   "User": "WORKSTATION5\\APT-Simulator",
+   "LogonGuid": "{e2c04bb9-a708-60c3-fb19-370000000000}",
+   "LogonId": "0x3719fb",
+   "TerminalSessionId": "2",
+   "IntegrityLevel": "High",
+   "Hashes": "SHA1=937FAB1F3A34287C44B11C3CB18A964FF6C84983,MD5=E46C638010C25479F66BACBE8596CA76,SHA256=39C59C362649090B4D34E5C8221C6E86552C07FE2DF3478D591A68B70917BC0A,IMPHASH=35A7FFDE18D444A92D32C8B2879450FF",
+   "ParentProcessGuid": "{e2c04bb9-d0f0-60c3-48da-ec0000000000}",
+   "ParentProcessId": "5632",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "ParentCommandLine": "\"C:\\Windows\\system32\\cmd.exe\" "
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": "4",
+   "Task": "1",
+   "TimeCreated": {
+    "SystemTime": 1623402461
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2021-06-12 01:07:41.363",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "sc  delete tbbd05 ",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "Detection": "Service Control Spawned via Script Interpreter"
+ },
+ {
+  "_EventData": {
+   "RuleName": "-",
+   "@timestamp": "2020-10-12T22:34:38.928Z",
+   "ParentProcessGuid": "{71b87c12-d9fe-5f84-1701-000000000500}",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "UserID": "S-1-5-18",
+   "RecordNumber": 338555,
+   "ThreadID": 3444,
+   "Image": "C:\\Windows\\System32\\wuauclt.exe",
+   "CurrentDirectory": "C:\\Users\\pgustavo\\Desktop\\",
+   "IntegrityLevel": "High",
+   "ProcessId": "6208",
+   "Company": "Microsoft Corporation",
+   "Version": 5,
+   "Hostname": "WORKSTATION5.theshire.local",
+   "Description": "Windows Update",
+   "EventReceivedTime": "2020-10-12 18:34:38",
+   "ProviderGuid": "{5770385F-C22A-43E0-BF4C-06F5698FFBD9}",
+   "ParentProcessId": "3148",
+   "UtcTime": "2020-10-12 22:34:38.157",
+   "port": 61041,
+   "Severity": "INFO",
+   "tags": [
+    "mordorDataset"
+   ],
+   "Task": 1,
+   "TerminalSessionId": "2",
+   "SourceModuleType": "im_msvistalog",
+   "OpcodeValue": 0,
+   "EventType": "INFO",
+   "ExecutionProcessID": 3312,
+   "Opcode": "Info",
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "Product": "Microsoft® Windows® Operating System",
+   "User": "THESHIRE\\pgustavo",
+   "Keywords": -9223372036854775808,
+   "FileVersion": "10.0.18362.1082 (WinBuild.160101.0800)",
+   "LogonGuid": "{71b87c12-d426-5f84-263d-160000000000}",
+   "EventID": 1,
+   "Domain": "NT AUTHORITY",
+   "Category": "Process Create (rule: ProcessCreate)",
+   "CommandLine": "C:\\Windows\\System32\\wuauclt.exe  /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer",
+   "LogonId": "0x163d26",
+   "OriginalFileName": "wuauclt.exe",
+   "@version": "1",
+   "AccountName": "SYSTEM",
+   "ProcessGuid": "{71b87c12-d9fe-5f84-1901-000000000500}",
+   "host": "wec.internal.cloudapp.net",
+   "Hashes": "SHA1=2F40F94E713BC7D5759B15A15A2877014E27C05C,MD5=66A49AF6FA9EBC17ACF17313D0DE25E1,SHA256=A039511A553F9DA172468D4A0EB4552212A88AB9F0D0EE18CFEE7DDF2E2A9A2C,IMPHASH=BE9B473C189DDACB39D5DEE749A544E5",
+   "SeverityValue": 2,
+   "EventTime": "2020-10-12 18:34:38",
+   "Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2020-10-12 22:34:38.157\r\nProcessGuid: {71b87c12-d9fe-5f84-1901-000000000500}\r\nProcessId: 6208\r\nImage: C:\\Windows\\System32\\wuauclt.exe\r\nFileVersion: 10.0.18362.1082 (WinBuild.160101.0800)\r\nDescription: Windows Update\r\nProduct: Microsoft® Windows® Operating System\r\nCompany: Microsoft Corporation\r\nOriginalFileName: wuauclt.exe\r\nCommandLine: C:\\Windows\\System32\\wuauclt.exe  /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer\r\nCurrentDirectory: C:\\Users\\pgustavo\\Desktop\\\r\nUser: THESHIRE\\pgustavo\r\nLogonGuid: {71b87c12-d426-5f84-263d-160000000000}\r\nLogonId: 0x163D26\r\nTerminalSessionId: 2\r\nIntegrityLevel: High\r\nHashes: SHA1=2F40F94E713BC7D5759B15A15A2877014E27C05C,MD5=66A49AF6FA9EBC17ACF17313D0DE25E1,SHA256=A039511A553F9DA172468D4A0EB4552212A88AB9F0D0EE18CFEE7DDF2E2A9A2C,IMPHASH=BE9B473C189DDACB39D5DEE749A544E5\r\nParentProcessGuid: {71b87c12-d9fe-5f84-1701-000000000500}\r\nParentProcessId: 3148\r\nParentImage: C:\\Windows\\System32\\cmd.exe\r\nParentCommandLine: \"cmd.exe\" /c C:\\Windows\\System32\\wuauclt.exe /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer",
+   "SourceModuleName": "eventlog",
+   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+   "AccountType": "User",
+   "ParentCommandLine": "\"cmd.exe\" /c C:\\Windows\\System32\\wuauclt.exe /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer"
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385F-C22A-43E0-BF4C-06F5698FFBD9}"
+   },
+   "EventID": {
+    "Value": 1
+   },
+   "Level": null,
+   "Task": 1,
+   "TimeCreated": {
+    "SystemTime": null
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5.theshire.local",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2020-10-12 22:34:38.157",
+  "Image": "C:\\Windows\\System32\\wuauclt.exe",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "C:\\Windows\\System32\\wuauclt.exe  /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer",
+  "User": "THESHIRE\\pgustavo",
+  "Detection": "ImageLoad via Windows Update Auto Update Client"
+ },
+ {
+  "_EventData": {
+   "@timestamp": "2020-10-22T01:54:25.416Z",
+   "TimeCreated": "2020-10-22T01:54:25.416Z",
+   "QueryName": "ocsp.int-x3.letsencrypt.org",
+   "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
+   "UtcTime": "2020-10-22 05:54:24.257",
+   "ProcessGuid": "{39e4a257-f138-5f8b-5600-000000000700}",
+   "Image": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2009.7-0\\MsMpEng.exe",
+   "Level": "4",
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Task": "22",
+   "RuleName": "-",
+   "QueryStatus": "9701",
+   "SourceName": "Microsoft-Windows-Sysmon",
+   "Hostname": "WORKSTATION5",
+   "QueryResults": "-",
+   "ProcessId": "3408",
+   "EventID": 22,
+   "Keywords": "0x8000000000000000",
+   "Message": "Dns query:\r\nRuleName: -\r\nUtcTime: 2020-10-22 05:54:24.257\r\nProcessGuid: {39e4a257-f138-5f8b-5600-000000000700}\r\nProcessId: 3408\r\nQueryName: ocsp.int-x3.letsencrypt.org\r\nQueryStatus: 9701\r\nQueryResults: -\r\nImage: C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2009.7-0\\MsMpEng.exe"
+  },
+  "_System": {
+   "Provider": {
+    "Name": "Microsoft-Windows-Sysmon",
+    "Guid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}"
+   },
+   "EventID": {
+    "Value": 22
+   },
+   "Level": "4",
+   "Task": "22",
+   "TimeCreated": {
+    "SystemTime": 1603331665
+   },
+   "Execution": {},
+   "Channel": "Microsoft-Windows-Sysmon/Operational",
+   "Computer": "WORKSTATION5",
+   "Security": {
+    "UserID": ""
+   }
+  },
+  "UtcTime": "2020-10-22 05:54:24.257",
+  "QueryName": "ocsp.int-x3.letsencrypt.org",
+  "Image": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2009.7-0\\MsMpEng.exe",
+  "protocol": "dns",
+  "Detection": "Connection to Commonly Abused Free SSL Certificate Providers"
+ }
+]
