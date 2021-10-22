@@ -2,26 +2,24 @@ artifact = name: Windows.Sysmon.Detection
 description: |
   Automated artifact for detection based on EQL.
 
+  ### Privilege Escalation via Windir Environment Variable
+  ```
   registry where registry.path : ("HKEY_USERS\\*\\Environment\\windir", "HKEY_USERS\\*\\Environment\\systemroot")
+  ```
 parameters:
 - name: EVTXGlob
   description: Glob to search for EVTX files.
   default: C:\Windows\System32\Winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx
 sources:
 - query: |-
-    LET SysmonGenerator <= generate(name="Sysmon",
+    LET SysmonGenerator = generate(name="Sysmon",
     query={
       SELECT * FROM foreach(row={SELECT FullPath FROM glob(globs=EVTXGlob)},
          query={
           SELECT *
           FROM parse_evtx(filename=FullPath)
         })
-    })
-
-    LET ParseDetails(Details) = if(condition=Details =~ "[QD]WORD",
-    then=str(str=atoi(string=parse_string_with_regex(string=Details,
-       regex='''(0x[0-9a-f]+)\)$''').g1)),
-    else=Details)
+    }, delay=500)
 
     LET NormalizeHive(Path) = regex_transform(
         key="hives", map=dict(
@@ -29,23 +27,32 @@ sources:
           `^HKLM`="HKEY_LOCAL_MACHINE", `^HKU`="HKEY_USERS"
         ), source=Path)
 
-    LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
-    LET RegInfo = SELECT *,
-      get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
-      ParseDetails(Details=EventData.Details) AS ValueData
-    FROM SysmonGenerator
-    WHERE System.EventID.Value in (12, 13, 14)
+    LET ParseDetails(Details) = if(condition=Details =~ "[QD]WORD",
+    then=str(str=atoi(string=parse_string_with_regex(string=Details,
+       regex='''(0x[0-9a-f]+)\)$''').g1)),
+    else=Details)
 
-    SELECT EventData || UserData AS _EventData,
+    LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
+    LET RegInfo = generate(name="RegInfo", query={
+      SELECT *,
+             get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
+             ParseDetails(Details=EventData.Details) AS ValueData
+      FROM SysmonGenerator
+      WHERE System.EventID.Value in (12, 13, 14)
+    })
+
+    LET _PrivilegeEscalationviaWindirEnvironmentVariable = SELECT EventData || UserData AS _EventData,
            System AS _System,
            EventData.UtcTime AS UtcTime,
            EventData.EventType AS EventType,
            EventData.Image AS Image,
            EventData.TargetObject AS TargetObject,
            EventData.Details AS Details,
-           'privilege_escalation_rogue_windir_environment_var.toml' AS Detection
+           'Privilege Escalation via Windir Environment Variable' AS Detection
     FROM RegInfo
     WHERE NormalizeHive(Path=EventData.TargetObject) =~ 'HKEY_USERS\\\\.*\\\\Environment\\\\windir|HKEY_USERS\\\\.*\\\\Environment\\\\systemroot'
+
+    SELECT * FROM _PrivilegeEscalationviaWindirEnvironmentVariable
 
 
 output = [
@@ -93,7 +100,7 @@ output = [
   "Image": "C:\\Windows\\explorer.exe",
   "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
   "Details": "\"C:\\Windows\\system32\\cmd.exe\"",
-  "Detection": "privilege_escalation_rogue_windir_environment_var.toml"
+  "Detection": "Privilege Escalation via Windir Environment Variable"
  },
  {
   "_EventData": {
@@ -138,6 +145,6 @@ output = [
   "Image": "C:\\Windows\\explorer.exe",
   "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
   "Details": null,
-  "Detection": "privilege_escalation_rogue_windir_environment_var.toml"
+  "Detection": "Privilege Escalation via Windir Environment Variable"
  }
 ]

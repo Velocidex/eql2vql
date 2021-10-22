@@ -2,6 +2,8 @@ artifact = name: Windows.Sysmon.Detection
 description: |
   Automated artifact for detection based on EQL.
 
+  ### Service Control Spawned via Script Interpreter
+  ```
   process where event.type == "start" and
     (process.name : "sc.exe" or process.pe.original_file_name == "sc.exe") and
     process.parent.name : ("cmd.exe", "wscript.exe", "rundll32.exe", "regsvr32.exe",
@@ -9,6 +11,7 @@ description: |
     process.args:("config", "create", "start", "delete", "stop", "pause") and
     /* exclude SYSTEM SID - look for service creations by non-SYSTEM user */
     not user.id : "S-1-5-18"
+  ```
 parameters:
 - name: SecurityEventsJSONPath
   description: Path to the security events file.
@@ -18,9 +21,9 @@ sources:
     LET Events = SELECT parse_json(data=Line) AS EventData
     FROM parse_lines(filename=SecurityEventsJSONPath)
 
-    LET SysmonGenerator <= generate(name="Sysmon",
+    LET SysmonGenerator = generate(name="Sysmon",
     query={
-     SELECT
+    SELECT
       dict(
          Provider=dict(
             Name=EventData.SourceName,
@@ -46,27 +49,31 @@ sources:
       FROM Events
     })
 
+    LET ProcessInfo = generate(name="ProcessInfo", query={
+       SELECT *,
+              get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
+       FROM SysmonGenerator
+       WHERE System.EventID.Value in (1, 5)
+    })
+
     LET ProcessTypes <= dict(`1`="start", `5`="stop")
 
-    LET ProcessInfo = SELECT *,
-      get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
-    FROM SysmonGenerator
-    WHERE System.EventID.Value in (1, 5)
-
-    SELECT EventData || UserData AS _EventData,
+    LET _ServiceControlSpawnedviaScriptInterpreter = SELECT EventData || UserData AS _EventData,
            System AS _System,
            EventData.UtcTime AS UtcTime,
            EventData.Image AS Image,
            EventData.ParentImage AS ParentImage,
            EventData.CommandLine AS CommandLine,
            EventData.User AS User,
-           'lateral_movement_service_control_spawned_script_int.toml' AS Detection
+           'Service Control Spawned via Script Interpreter' AS Detection
     FROM ProcessInfo
     WHERE  ( event_type = 'start'
       AND  ( EventData.Image =~ 'sc\\.exe' OR EventData.OriginalFileName = 'sc.exe' ) 
       AND EventData.ParentImage =~ 'cmd\\.exe|wscript\\.exe|rundll32\\.exe|regsvr32\\.exe|wmic\\.exe|mshta\\.exe|powershell\\.exe|pwsh\\.exe'
       AND EventData.CommandLine =~ 'config|create|start|delete|stop|pause'
       AND  NOT EventData.User =~ 'S-1-5-18' )
+
+    SELECT * FROM _ServiceControlSpawnedviaScriptInterpreter
 
 
 output = [
@@ -131,7 +138,7 @@ output = [
   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
   "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
   "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+  "Detection": "Service Control Spawned via Script Interpreter"
  },
  {
   "_EventData": {
@@ -194,7 +201,7 @@ output = [
   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
   "CommandLine": "sc  start tbbd05 ",
   "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+  "Detection": "Service Control Spawned via Script Interpreter"
  },
  {
   "_EventData": {
@@ -257,7 +264,7 @@ output = [
   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
   "CommandLine": "sc  stop tbbd05 ",
   "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+  "Detection": "Service Control Spawned via Script Interpreter"
  },
  {
   "_EventData": {
@@ -320,6 +327,6 @@ output = [
   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
   "CommandLine": "sc  delete tbbd05 ",
   "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "lateral_movement_service_control_spawned_script_int.toml"
+  "Detection": "Service Control Spawned via Script Interpreter"
  }
 ]

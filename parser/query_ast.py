@@ -5,10 +5,10 @@ def Export(x):
     name = x.__class__.__name__
     handler = Dispatcher.get(name)
     if handler is None:
-        print("No handler known for %s:" % name)
-        print(x)
+        Debug("No handler known for %s:" % name)
+        Debug(x)
         # import pdb; pdb.set_trace()
-        print(x)
+        Debug(x)
     else:
         return handler(x)
 

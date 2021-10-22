@@ -2,6 +2,8 @@ artifact = name: Windows.Sysmon.Detection
 description: |
   Automated artifact for detection based on EQL.
 
+  ### Connection to Commonly Abused Free SSL Certificate Providers
+  ```
   network where network.protocol == "dns" and
     /* Add new free SSL certificate provider domains here */
     dns.question.name : ("*letsencrypt.org", "*.sslforfree.com", "*.zerossl.com", "*.freessl.org") and
@@ -17,6 +19,7 @@ description: |
 
     /* Insert noisy false positives here */
     not process.name : ("svchost.exe", "MicrosoftEdge*.exe", "msedge.exe")
+  ```
 parameters:
 - name: SecurityEventsJSONPath
   description: Path to the security events file.
@@ -26,9 +29,9 @@ sources:
     LET Events = SELECT parse_json(data=Line) AS EventData
     FROM parse_lines(filename=SecurityEventsJSONPath)
 
-    LET SysmonGenerator <= generate(name="Sysmon",
+    LET SysmonGenerator = generate(name="Sysmon",
     query={
-     SELECT
+    SELECT
       dict(
          Provider=dict(
             Name=EventData.SourceName,
@@ -54,22 +57,26 @@ sources:
       FROM Events
     })
 
-    LET NetworkInfo = SELECT *, "dns" AS protocol
-    FROM SysmonGenerator
-    WHERE System.EventID.Value = 22
+    LET NetworkInfo = generate(name="NetworkInfo", query={
+      SELECT *, "dns" AS protocol
+      FROM SysmonGenerator
+      WHERE System.EventID.Value = 22
+    })
 
-    SELECT EventData || UserData AS _EventData,
+    LET _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders = SELECT EventData || UserData AS _EventData,
            System AS _System,
            EventData.UtcTime AS UtcTime,
            EventData.QueryName AS QueryName,
            EventData.Image AS Image,
            protocol,
-           'command_and_control_encrypted_channel_freesslcert.toml' AS Detection
+           'Connection to Commonly Abused Free SSL Certificate Providers' AS Detection
     FROM NetworkInfo
     WHERE  ( protocol = 'dns'
       AND EventData.QueryName =~ '.*letsencrypt\\.org|.*\\.sslforfree\\.com|.*\\.zerossl\\.com|.*\\.freessl\\.org'
       AND EventData.Image =~ 'C:\\\\Windows\\\\System32\\\\.*\\.exe|C:\\\\Windows\\\\System\\\\.*\\.exe|C:\\\\Windows\\\\SysWOW64\\\\.*\\.exe|C:\\\\Windows\\\\Microsoft\\.NET\\\\Framework.*\\\\.*\\.exe|C:\\\\Windows\\\\explorer\\.exe|C:\\\\ProgramData\\\\Microsoft\\\\Windows Defender\\\\.*\\\\MsMpEng\\.exe|C:\\\\Windows\\\\notepad\\.exe'
       AND  NOT EventData.Image =~ 'svchost\\.exe|MicrosoftEdge.*\\.exe|msedge\\.exe' )
+
+    SELECT * FROM _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders
 
 
 output = [
@@ -119,6 +126,6 @@ output = [
   "QueryName": "ocsp.int-x3.letsencrypt.org",
   "Image": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2009.7-0\\MsMpEng.exe",
   "protocol": "dns",
-  "Detection": "command_and_control_encrypted_channel_freesslcert.toml"
+  "Detection": "Connection to Commonly Abused Free SSL Certificate Providers"
  }
 ]
