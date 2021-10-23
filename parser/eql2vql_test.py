@@ -60,6 +60,32 @@ class SecurityDatasetTestSuite(EVTXTestSuite):
     provider = providers.SecurityDatasetTestProvider
 
 
+class AllTogetherNow(SecurityDatasetTestSuite):
+    """Build a single artifact from all EQL queries."""
+
+    name = "AllTogetherNow"
+
+    def RunTest(self, tests=None, update=False,
+                verbose=False, testdir=None):
+        if tests and self.name not in tests:
+            return
+
+        # Combine all the json files into a single JSON file to
+        # simulate unsorted events.
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            sample = os.path.join(tmpdirname, "test.json")
+            rules = []
+            with open(sample, "w+") as fd:
+                for test in self.TEST_CASES:
+                    fd.write(open(test["sample"]).read())
+                    rules.append(test["rule"])
+
+            testutils.RunTestWithProvider(
+                self.name, rules, sample,
+                self.provider, update=update, verbose=verbose,
+                testdir=testdir)
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
 
@@ -69,3 +95,6 @@ if __name__ == "__main__":
     EVTXTestSuite().RunTest(args.tests, args.update,
                             verbose=args.verbose,
                             testdir=args.testdir)
+    AllTogetherNow().RunTest(args.tests, args.update,
+                             verbose=args.verbose,
+                             testdir=args.testdir)

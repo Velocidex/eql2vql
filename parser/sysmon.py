@@ -14,6 +14,7 @@ operates directly on the raw fields.
 """
 import textwrap
 import json
+import re
 
 class UnknownCategory(Exception):
     def __init__(self, category):
@@ -34,8 +35,17 @@ def to_regex(expr):
     res = res.replace("?", ".")
     res = res.replace("+", "\\\\+")
     res = res.replace(".", "\\\\.")
+    res = res.replace("(", "\\\\(")
+    res = res.replace(")", "\\\\)")
     return res.replace("*", ".*")
 
+def quote(x):
+   if " " in x:
+       return "'" + x + "'"
+   return x
+
+def AsName(x):
+    return "_" + re.sub("[^a-zA-Z]", "", x)
 
 ProcessColumns = [
     "EventData.UtcTime",
@@ -43,6 +53,14 @@ ProcessColumns = [
     "EventData.ParentImage",
     "EventData.CommandLine",
     "EventData.User",
+]
+
+FileColumns = [
+    "EventData",
+]
+
+LibraryColumns = [
+    "EventData",
 ]
 
 RegistryColumns = [
@@ -67,61 +85,80 @@ class SysmonMatcher:
     Preamble = {
         # Process related logs. Combine several event IDs into the
         # same generator.
-        "process": """
-        LET ProcessTypes <= dict(`1`="start", `5`="stop")
+        "process": dict(
+            ProcessTypes="""
+                LET ProcessTypes <= dict(`1`="start", `5`="stop")
+            """,
+            ProcessInfo="""
+                LET ProcessInfo = generate(name="ProcessInfo", query={
+                  SELECT *,
+                         get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
+                  FROM SysmonGenerator
+                  WHERE System.EventID.Value in (1, 5)
+               })
+            """),
 
-        LET ProcessInfo = SELECT *,
-          get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
-        FROM SysmonGenerator
-        WHERE System.EventID.Value in (1, 5)
-        """,
-
-        "library": """
-        LET LibraryInfo = SELECT *, "load" AS action, "library" AS category
-        FROM SysmonGenerator
-        WHERE System.EventID.Value in 7
-        """,
+        "library": dict(
+            LibraryInfo="""
+                LET LibraryInfo = generate(name="LibraryInfo", query={
+                  SELECT *, "load" AS action, "library" AS category
+                  FROM SysmonGenerator
+                  WHERE System.EventID.Value in 7
+                })
+            """),
 
         # File modification logs. Combine several event IDs into the
         # same generator.
-        "file": """
-        LET FileTypes <= dict(`23`="deletion", `11`="creation")
-
-        LET FileInfo = SELECT *,
-          get(item=FileTypes, field=str(str=System.EventID.Value)) AS event_type
-        FROM SysmonGenerator
-        WHERE System.EventID.Value in (23, 11)
-        """,
+        "file": dict(
+            FileTypes="""
+                LET FileTypes <= dict(`23`="deletion", `11`="creation")
+            """,
+            FileInfo="""
+                LET FileInfo = generate(name="FileInfo", query={
+                   SELECT *,
+                          get(item=FileTypes, field=str(str=System.EventID.Value)) AS event_type
+                   FROM SysmonGenerator
+                   WHERE System.EventID.Value in (23, 11)
+                })
+            """),
 
         # Network logs. Combine several event IDs into the same
         # generator.
-        "network": """
-        LET NetworkInfo = SELECT *, "dns" AS protocol
-        FROM SysmonGenerator
-        WHERE System.EventID.Value = 22
-        """,
+        "network": dict(
+            NetworkInfo="""
+                LET NetworkInfo = generate(name="NetworkInfo", query={
+                  SELECT *, "dns" AS protocol
+                  FROM SysmonGenerator
+                  WHERE System.EventID.Value = 22
+                })
+            """),
 
         # Represent the value as a string. Sysmon encodes values as
         # hex, but eql seems to use integers.
-        "registry": """
-        LET ParseDetails(Details) = if(condition=Details =~ "[QD]WORD",
-        then=str(str=atoi(string=parse_string_with_regex(string=Details,
-           regex='''(0x[0-9a-f]+)\\)$''').g1)),
-        else=Details)
-
-        LET NormalizeHive(Path) = regex_transform(
-            key="hives", map=dict(
-              `^HKCR`="HKEY_CLASSES_ROOT", `^HKCU`="HKEY_CURRENT_USER",
-              `^HKLM`="HKEY_LOCAL_MACHINE", `^HKU`="HKEY_USERS"
-            ), source=Path)
-
-        LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
-        LET RegInfo = SELECT *,
-          get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
-          ParseDetails(Details=EventData.Details) AS ValueData
-        FROM SysmonGenerator
-        WHERE System.EventID.Value in (12, 13, 14)
-        """,
+        "registry": dict(
+            ParseDetails="""
+                LET ParseDetails(Details) = if(condition=Details =~ "[QD]WORD",
+                then=str(str=atoi(string=parse_string_with_regex(string=Details,
+                   regex='''(0x[0-9a-f]+)\\)$''').g1)),
+                else=Details)
+            """,
+            NormalizeHive="""
+                LET NormalizeHive(Path) = regex_transform(
+                    key="hives", map=dict(
+                      `^HKCR`="HKEY_CLASSES_ROOT", `^HKCU`="HKEY_CURRENT_USER",
+                      `^HKLM`="HKEY_LOCAL_MACHINE", `^HKU`="HKEY_USERS"
+                    ), source=Path)
+            """,
+            RegTypes="""
+                LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
+                LET RegInfo = generate(name="RegInfo", query={
+                  SELECT *,
+                         get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
+                         ParseDetails(Details=EventData.Details) AS ValueData
+                  FROM SysmonGenerator
+                  WHERE System.EventID.Value in (12, 13, 14)
+                })
+                """),
     }
 
     # A mapping between EQL fields and sysmon fields as retrieved by
@@ -163,14 +200,14 @@ class SysmonMatcher:
 
         "rule|name": "EventData.RuleName",
 
-        "user|domain": "split(path=EventData.User, sep='\\\\')[0]",
+        "user|domain": "split(string=EventData.User, sep='''\\\\''')[0]",
         "user|id": "EventData.User",
         "user|name": "EventData.User",
 
         # Event 2 File creation time changed.
         "file|code_signature.signed": "EventData.Signed",
         "file|code_signature.valid": "EventData.Signed = 'Valid'",
-        "file|extension": "split(string=EventData.TargetFilename, sep='\\\\.')[-1]",
+        "file|extension": "split(string=EventData.TargetFilename, sep='''\\\\.''')[-1]",
         "file|path": "EventData.TargetFilename",
         "file|name": "basename(path=EventData.TargetFilename)",
         "file|directory": "dirname(path=EventData.TargetFilename)",
@@ -214,7 +251,7 @@ class SysmonMatcher:
         self.enrichments = {}
         self.detection = detection
         self.eql = eql
-        self.preamble = []
+        self.preamble = {}
 
         # Columns we will be selecting
         self.columns = ["*"]
@@ -241,17 +278,23 @@ class SysmonMatcher:
             result.append(c)
         return result
 
+    def SetDefinitions(self, definitions):
+        for k, preamble in self.preamble.items():
+            preamble = textwrap.dedent(preamble)
+            definitions[k] = preamble
+
     def AnalysisQuery(self):
         """ Return the analysis query for the rule."""
         columns = self.getColumns()
-        columns.append(self.detection + " AS Detection")
+        columns.append(quote(self.detection) + " AS Detection")
 
-        preambles = [textwrap.dedent(x) for x in self.preamble]
+        name = AsName(self.detection)
 
-        return "\n".join(preambles) + """
-SELECT %s
+        return name, """
+LET %s = SELECT %s
 FROM %s
-WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
+WHERE %s """ % (name, ",\n       ".join(columns),
+                self.source, self.where)
 
     def Visit(self, ast):
         if isinstance(ast, str):
@@ -262,7 +305,7 @@ WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
         try:
             handler = getattr(self, t)
         except AttributeError:
-            print("No handler for %s" % t)
+            Debug("No handler for %s" % t)
             # import pdb; pdb.set_trace()
             return ""
 
@@ -281,25 +324,27 @@ WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
 
         if event_type == "process":
             self.source = "ProcessInfo"
-            self.preamble.append(self.Preamble["process"])
+            self.preamble.update(self.Preamble["process"])
             self.SetColumns(ProcessColumns)
 
         elif event_type == "library":
             self.source = "LibraryInfo"
-            self.preamble.append(self.Preamble["library"])
+            self.preamble.update(self.Preamble["library"])
+            self.SetColumns(LibraryColumns)
 
         elif event_type == "file":
             self.source = "FileInfo"
-            self.preamble.append(self.Preamble["file"])
+            self.preamble.update(self.Preamble["file"])
+            self.SetColumns(FileColumns)
 
         elif event_type == "registry":
             self.source = "RegInfo"
-            self.preamble.append(self.Preamble["registry"])
+            self.preamble.update(self.Preamble["registry"])
             self.SetColumns(RegistryColumns)
 
         elif event_type == "network":
             self.source = "NetworkInfo"
-            self.preamble.append(self.Preamble["network"])
+            self.preamble.update(self.Preamble["network"])
             self.SetColumns(DNSColumns)
 
         else:
@@ -331,7 +376,7 @@ WHERE %s """ % (",\n       ".join(columns), self.source, self.where)
             try:
                 i = self.Visit(term)
             except UnknownField as e:
-                print("Skipping OR term for unsupported field " + e.key)
+                Debug("Skipping OR term for unsupported field " + e.key)
                 continue
 
             value.append(i)

@@ -14,11 +14,14 @@ import run_query
 
 FIXTURES = "testdata/fixtures/"
 
-def RunTestWithProvider(name, rule, sample, provider,
+def RunTestWithProvider(name, rules, sample, provider,
                         update=False, verbose=False, testdir=""):
     result = []
 
-    artifact = eql2vql.BuildArtifact([rule], provider=provider)
+    if not isinstance(rules, list):
+        rules = [rules]
+
+    artifact = eql2vql.BuildArtifact(rules, provider=provider)
     print("Testing %s with test file %s" % (name, sample))
 
     with tempfile.TemporaryDirectory() as tmpdirname:

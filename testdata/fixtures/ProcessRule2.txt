@@ -2,12 +2,15 @@ artifact = name: Windows.Sysmon.Detection
 description: |
   Automated artifact for detection based on EQL.
 
+  ### ImageLoad via Windows Update Auto Update Client
+  ```
   process where event.type in ("start", "process_started") and
     (process.pe.original_file_name == "wuauclt.exe" or process.name : "wuauclt.exe") and
      /* necessary windows update client args to load a dll */
      process.args : "/RunHandlerComServer" and process.args : "/UpdateDeploymentProvider" and
      /* common paths writeable by a standard user where the target DLL can be placed */
      process.args : ("C:\\Users\\*.dll", "C:\\ProgramData\\*.dll", "C:\\Windows\\Temp\\*.dll", "C:\\Windows\\Tasks\\*.dll")
+  ```
 parameters:
 - name: SecurityEventsJSONPath
   description: Path to the security events file.
@@ -17,9 +20,9 @@ sources:
     LET Events = SELECT parse_json(data=Line) AS EventData
     FROM parse_lines(filename=SecurityEventsJSONPath)
 
-    LET SysmonGenerator <= generate(name="Sysmon",
+    LET SysmonGenerator = generate(name="Sysmon",
     query={
-     SELECT
+    SELECT
       dict(
          Provider=dict(
             Name=EventData.SourceName,
@@ -45,27 +48,31 @@ sources:
       FROM Events
     })
 
+    LET ProcessInfo = generate(name="ProcessInfo", query={
+       SELECT *,
+              get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
+       FROM SysmonGenerator
+       WHERE System.EventID.Value in (1, 5)
+    })
+
     LET ProcessTypes <= dict(`1`="start", `5`="stop")
 
-    LET ProcessInfo = SELECT *,
-      get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
-    FROM SysmonGenerator
-    WHERE System.EventID.Value in (1, 5)
-
-    SELECT EventData || UserData AS _EventData,
+    LET _ImageLoadviaWindowsUpdateAutoUpdateClient = SELECT EventData || UserData AS _EventData,
            System AS _System,
            EventData.UtcTime AS UtcTime,
            EventData.Image AS Image,
            EventData.ParentImage AS ParentImage,
            EventData.CommandLine AS CommandLine,
            EventData.User AS User,
-           'defense_evasion_execution_lolbas_wuauclt.toml' AS Detection
+           'ImageLoad via Windows Update Auto Update Client' AS Detection
     FROM ProcessInfo
     WHERE  ( event_type IN ('start', 'process_started' ) 
       AND  ( EventData.OriginalFileName = 'wuauclt.exe' OR EventData.Image =~ 'wuauclt\\.exe' ) 
       AND EventData.CommandLine =~ '/RunHandlerComServer'
       AND EventData.CommandLine =~ '/UpdateDeploymentProvider'
       AND EventData.CommandLine =~ 'C:\\\\Users\\\\.*\\.dll|C:\\\\ProgramData\\\\.*\\.dll|C:\\\\Windows\\\\Temp\\\\.*\\.dll|C:\\\\Windows\\\\Tasks\\\\.*\\.dll' )
+
+    SELECT * FROM _ImageLoadviaWindowsUpdateAutoUpdateClient
 
 
 output = [
@@ -152,6 +159,6 @@ output = [
   "ParentImage": "C:\\Windows\\System32\\cmd.exe",
   "CommandLine": "C:\\Windows\\System32\\wuauclt.exe  /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer",
   "User": "THESHIRE\\pgustavo",
-  "Detection": "defense_evasion_execution_lolbas_wuauclt.toml"
+  "Detection": "ImageLoad via Windows Update Auto Update Client"
  }
 ]
