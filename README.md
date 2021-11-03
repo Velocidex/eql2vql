@@ -2,9 +2,7 @@
 
 Transform EQL detection rules to VQL artifacts.
 
-Elastic Query Lanaguage EQL is a query language designed to operate on
-an Elastic database and identify specific detections. EQL assumes a
-specific schema in which the data is stored.
+[Event Query Lanaguage](https://www.elastic.co/blog/introducing-event-query-language), EQL is a query language designed to identify specific detections. EQL assumes a specific schema in which the data is stored.
 
 In a nutshell, EQL relies on the following process to load the event
 data into Elastic backends:
