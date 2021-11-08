@@ -12,6 +12,7 @@ for every raw event to be transformed prior to matching, as VQL
 operates directly on the raw fields.
 
 """
+from debug import Debug
 import textwrap
 import json
 import re
@@ -25,19 +26,26 @@ class UnknownField(Exception):
     def __init__(self, key):
         self.key = key
 
+class InvalidAST(Exception):
+    pass
+
 
 def to_regex(expr):
     """Convert an eql glob like expression to a regex."""
 
     # Single \ needs to be doubled twice - once for VQL string and
     # once for regex.
+    # First escape literals.
     res = expr.replace("\\", "\\\\\\\\", -1)
-    res = res.replace("?", ".")
+
     res = res.replace("+", "\\\\+")
     res = res.replace(".", "\\\\.")
     res = res.replace("(", "\\\\(")
     res = res.replace(")", "\\\\)")
-    return res.replace("*", ".*")
+
+    # Now convert wildcards to regex
+    res = res.replace("?", ".")
+    return "^" + res.replace("*", ".*") + "$"
 
 def quote(x):
    if " " in x:
@@ -92,6 +100,9 @@ class SysmonMatcher:
             ProcessInfo="""
                 LET ProcessInfo = generate(name="ProcessInfo", query={
                   SELECT *,
+                         basename(path=EventData.ParentImage) AS ParentImageBase,
+                         basename(path=EventData.Image) AS ImageBase,
+                         commandline_split(command=EventData.CommandLine) AS CommandArgs,
                          get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
                   FROM SysmonGenerator
                   WHERE System.EventID.Value in (1, 5)
@@ -149,10 +160,11 @@ class SysmonMatcher:
                       `^HKLM`="HKEY_LOCAL_MACHINE", `^HKU`="HKEY_USERS"
                     ), source=Path)
             """,
-            RegTypes="""
+            RegTypes=r"""
                 LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
                 LET RegInfo = generate(name="RegInfo", query={
                   SELECT *,
+                         NormalizeHive(Path=EventData.TargetObject) AS NormalizedTargetObject,
                          get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
                          ParseDetails(Details=EventData.Details) AS ValueData
                   FROM SysmonGenerator
@@ -176,9 +188,9 @@ class SysmonMatcher:
         "process|parent.pid": "EventData.ParentProcessId",
         "process|parent.executable": "EventData.ParentImage",
         "process|parent.command_line": "EventData.ParentCommandLine",
-        "process|parent.name": "EventData.ParentImage",
-        "process|parent.args": "EventData.ParentCommandLine",
-        "process|name": "EventData.Image",
+        "process|parent.name": "ParentImageBase",
+        "process|parent.args": "commandline_split(command=EventData.ParentCommandLine)",
+        "process|name": "ImageBase",
 
         "process|pe.company": "EventData.Company",
         "process|pe.description": "EventData.Description",
@@ -190,7 +202,7 @@ class SysmonMatcher:
         "host|os.name": "Windows",
 
         "event|type": "event_type",
-        "process|args": "EventData.CommandLine",
+        "process|args": "CommandArgs",
         "process|code_signature.subject_name": {
             "column": "Signature.Subject",
             "enrichment": "Signature",
@@ -215,7 +227,7 @@ class SysmonMatcher:
         "file|code_signature.status": "EventData.signatureStatus",
 
         # https://github.com/elastic/beats/blob/46d17b411cce465466daf163a1014155cc2d93b2/x-pack/winlogbeat/module/sysmon/config/winlogbeat-sysmon.js#L592
-        "registry|path": "NormalizeHive(Path=EventData.TargetObject)",
+        "registry|path": "NormalizedTargetObject",
         "registry|data.strings": "ValueData",
         "registry|value": "ValueData",
 
@@ -290,7 +302,7 @@ class SysmonMatcher:
 
         name = AsName(self.detection)
 
-        return name, """
+        return name, r"""
 LET %s = SELECT %s
 FROM %s
 WHERE %s """ % (name, ",\n       ".join(columns),
@@ -300,14 +312,17 @@ WHERE %s """ % (name, ",\n       ".join(columns),
         if isinstance(ast, str):
             return "'" + ast + "'"
 
+        if ast is None:
+            raise InvalidAST()
+
         t = ast["type"]
 
         try:
             handler = getattr(self, t)
         except AttributeError:
+            #import pdb; pdb.set_trace()
             Debug("No handler for %s" % t)
-            # import pdb; pdb.set_trace()
-            return ""
+            raise UnknownField(t)
 
         return handler(ast)
 
@@ -377,7 +392,7 @@ WHERE %s """ % (name, ",\n       ".join(columns),
                 i = self.Visit(term)
             except UnknownField as e:
                 Debug("Skipping OR term for unsupported field " + e.key)
-                continue
+                raise UnknownField(term)
 
             value.append(i)
 
@@ -403,6 +418,7 @@ WHERE %s """ % (name, ",\n       ".join(columns),
 
             return sub
         except KeyError:
+            #import pdb; pdb.set_trace()
             raise UnknownField(key)
 
     def Comparison(self, ast):
@@ -428,9 +444,8 @@ WHERE %s """ % (name, ",\n       ".join(columns),
 
             # Figure out the regex from the wildcards
             regex = "|".join([to_regex(x) for x in arguments[1:]])
-
-            return (self.Visit(arguments[0]) +
-                    " =~ '" + regex + "'")
+            arg0 = self.Visit(arguments[0])
+            return arg0 + " =~ '" + regex + "'"
 
         if name == "match":
             if len(arguments) < 2:

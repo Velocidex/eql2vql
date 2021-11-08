@@ -30,6 +30,9 @@ def collect_artifact(artifact, directory, env=None, format="jsonl", verbose=Fals
 
     args = [velociraptor_exe, "--definitions", directory,
             "artifacts", "collect", artifact]
+    if verbose:
+        args.append("-v")
+
     for k, v in env.items():
         args.append("--args")
         args.append(k + "=" + v)

@@ -35,6 +35,7 @@ sources:
     LET RegTypes <= dict(`13`="value_set", `14`="rename", `12`="key_create")
     LET RegInfo = generate(name="RegInfo", query={
       SELECT *,
+             NormalizeHive(Path=EventData.TargetObject) AS NormalizedTargetObject,
              get(item=RegTypes, field=str(str=System.EventID.Value)) AS event_type,
              ParseDetails(Details=EventData.Details) AS ValueData
       FROM SysmonGenerator
@@ -50,7 +51,7 @@ sources:
            EventData.Details AS Details,
            'Privilege Escalation via Windir Environment Variable' AS Detection
     FROM RegInfo
-    WHERE NormalizeHive(Path=EventData.TargetObject) =~ 'HKEY_USERS\\\\.*\\\\Environment\\\\windir|HKEY_USERS\\\\.*\\\\Environment\\\\systemroot'
+    WHERE NormalizedTargetObject =~ '^HKEY_USERS\\\\.*\\\\Environment\\\\windir$|^HKEY_USERS\\\\.*\\\\Environment\\\\systemroot$'
 
     SELECT * FROM _PrivilegeEscalationviaWindirEnvironmentVariable
 

@@ -51,6 +51,9 @@ sources:
 
     LET ProcessInfo = generate(name="ProcessInfo", query={
        SELECT *,
+              basename(path=EventData.ParentImage) AS ParentImageBase,
+              basename(path=EventData.Image) AS ImageBase,
+              commandline_split(command=EventData.CommandLine) AS CommandArgs,
               get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
        FROM SysmonGenerator
        WHERE System.EventID.Value in (1, 5)
@@ -68,10 +71,10 @@ sources:
            'Service Control Spawned via Script Interpreter' AS Detection
     FROM ProcessInfo
     WHERE  ( event_type = 'start'
-      AND  ( EventData.Image =~ 'sc\\.exe' OR EventData.OriginalFileName = 'sc.exe' ) 
-      AND EventData.ParentImage =~ 'cmd\\.exe|wscript\\.exe|rundll32\\.exe|regsvr32\\.exe|wmic\\.exe|mshta\\.exe|powershell\\.exe|pwsh\\.exe'
-      AND EventData.CommandLine =~ 'config|create|start|delete|stop|pause'
-      AND  NOT EventData.User =~ 'S-1-5-18' )
+      AND  ( ImageBase =~ '^sc\\.exe$' OR EventData.OriginalFileName = 'sc.exe' ) 
+      AND ParentImageBase =~ '^cmd\\.exe$|^wscript\\.exe$|^rundll32\\.exe$|^regsvr32\\.exe$|^wmic\\.exe$|^mshta\\.exe$|^powershell\\.exe$|^pwsh\\.exe$'
+      AND CommandArgs =~ '^config$|^create$|^start$|^delete$|^stop$|^pause$'
+      AND  NOT EventData.User =~ '^S-1-5-18$' )
 
     SELECT * FROM _ServiceControlSpawnedviaScriptInterpreter
 
