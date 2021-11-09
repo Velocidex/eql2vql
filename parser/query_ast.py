@@ -2,15 +2,21 @@ import eql
 import json
 from debug import Debug
 
+class UnknownHandler(Exception):
+    def __init__(self, key, ast):
+        self.key = key
+        self.ast = ast
+
+    def __str__(self):
+        return "No handler known for %s:\n%s " % (self.key, self.ast)
 
 def Export(x):
     name = x.__class__.__name__
     handler = Dispatcher.get(name)
     if handler is None:
-        Debug("No handler known for %s:" % name)
-        Debug(x)
+        raise UnknownHandler(name, x)
         # import pdb; pdb.set_trace()
-        Debug(x)
+        # Debug(x)
     else:
         return handler(x)
 

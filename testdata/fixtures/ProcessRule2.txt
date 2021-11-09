@@ -1,4 +1,5 @@
 artifact = name: Windows.Sysmon.Detection
+type: CLIENT
 description: |
   Automated artifact for detection based on EQL.
 
@@ -60,14 +61,14 @@ sources:
 
     LET ProcessTypes <= dict(`1`="start", `5`="stop")
 
-    LET _ImageLoadviaWindowsUpdateAutoUpdateClient = SELECT EventData || UserData AS _EventData,
-           System AS _System,
-           EventData.UtcTime AS UtcTime,
-           EventData.Image AS Image,
-           EventData.ParentImage AS ParentImage,
-           EventData.CommandLine AS CommandLine,
+    LET _ImageLoadviaWindowsUpdateAutoUpdateClient = SELECT 'ImageLoad via Windows Update Auto Update Client' AS Detection,
            EventData.User AS User,
-           'ImageLoad via Windows Update Auto Update Client' AS Detection
+           EventData.CommandLine AS CommandLine,
+           EventData.ParentImage AS ParentImage,
+           EventData.Image AS Image,
+           EventData.UtcTime AS UtcTime,
+           EventData || UserData AS _EventData,
+           System AS _System
     FROM ProcessInfo
     WHERE  ( event_type IN ('start', 'process_started' ) 
       AND  ( EventData.OriginalFileName = 'wuauclt.exe' OR ImageBase =~ '^wuauclt\\.exe$' ) 
@@ -80,6 +81,12 @@ sources:
 
 output = [
  {
+  "Detection": "ImageLoad via Windows Update Auto Update Client",
+  "User": "THESHIRE\\pgustavo",
+  "CommandLine": "C:\\Windows\\System32\\wuauclt.exe  /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "Image": "C:\\Windows\\System32\\wuauclt.exe",
+  "UtcTime": "2020-10-12 22:34:38.157",
   "_EventData": {
    "RuleName": "-",
    "@timestamp": "2020-10-12T22:34:38.928Z",
@@ -156,12 +163,6 @@ output = [
    "Security": {
     "UserID": ""
    }
-  },
-  "UtcTime": "2020-10-12 22:34:38.157",
-  "Image": "C:\\Windows\\System32\\wuauclt.exe",
-  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
-  "CommandLine": "C:\\Windows\\System32\\wuauclt.exe  /UpdateDeploymentProvider C:\\ProgramData\\SimpleInjection.dll /RunHandlerComServer",
-  "User": "THESHIRE\\pgustavo",
-  "Detection": "ImageLoad via Windows Update Auto Update Client"
+  }
  }
 ]
