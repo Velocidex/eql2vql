@@ -5,16 +5,30 @@ import sysmon
 import os
 import re
 import sys
+import etw_provider
 import providers
 import dumper
+
+import debug
 
 from debug import Debug
 
 parser = argparse.ArgumentParser(
     description='Convert EQL detection rules to a VQL artifact.')
 
-parser.add_argument("--provider", type=str, default="SysmonEVTXLogProvider",
+parser.add_argument("-p", "--provider", type=str,
+                    choices=[
+                        "SysmonEVTXLogProvider",
+                        "SysmonETWProvider",
+                    ],
+                    default="SysmonEVTXLogProvider",
                     help="Name of provider to use")
+
+parser.add_argument("-v", "--verbose", action='store_true',
+                    help="Enable verbose messages.")
+
+parser.add_argument("-o", "--output", type=str, required=True,
+                    help="Output file to write on")
 
 parser.add_argument('files', metavar='N', type=str, nargs='+',
                     help='EQL TOML files to parse')
@@ -44,6 +58,9 @@ def GetProvider(name):
     if name == "SecurityDatasetTestProvider":
         return providers.SecurityDatasetTestProvider
 
+    if name == "SysmonETWProvider":
+        return etw_provider.SysmonETWProvider
+
     raise RuntimeError("Unknown provider %s" % name)
 
 
@@ -59,11 +76,12 @@ def BuildArtifact(
             if sysmon_engine:
                 analyzers.append(sysmon_engine)
         except Exception as e:
-            #import pdb; pdb.set_trace()
+#            import pdb; pdb.set_trace()
             Debug("Unable to load %s: %s" % (f, e))
 
     p = provider(analyzers)
     artifact = p.Render()
+    print("Created artifact %r with %s detections" % (p.name, len(p.analyzers)))
     return dumper.DumpAsYaml(artifact)
 
 
@@ -73,6 +91,10 @@ if __name__ == "__main__":
     if args.exclude_regex:
         exclude_regex = re.compile(args.exclude_regex)
 
-    print(BuildArtifact(
-        args.files, provider=GetProvider(args.provider),
-        exclude_regex=exclude_regex))
+    debug.DEBUG = args.verbose
+
+    with open(args.output, "w+") as fd:
+        query = BuildArtifact(
+            args.files, provider=GetProvider(args.provider),
+            exclude_regex=exclude_regex)
+        fd.write(query)

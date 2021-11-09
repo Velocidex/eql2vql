@@ -32,6 +32,7 @@ class BaseProvider(object):
         """Render the entire artifact."""
         return OrderedDict(
             name=self.name,
+            type=self.type,
             description=self.GetDescription(),
             parameters=self.parameters,
             sources=[OrderedDict(query=self.GetQuery())])

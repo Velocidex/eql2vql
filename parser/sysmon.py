@@ -26,6 +26,10 @@ class UnknownField(Exception):
     def __init__(self, key):
         self.key = key
 
+    def __str__(self):
+        return "No handler known for %s " % self.key
+
+
 class InvalidAST(Exception):
     pass
 
@@ -287,7 +291,7 @@ class SysmonMatcher:
         for c in self.columns:
             if "EventData" in c:
                 c = c + " AS " + c.split(".")[-1]
-            result.append(c)
+            result.insert(0, c)
         return result
 
     def SetDefinitions(self, definitions):
@@ -298,7 +302,7 @@ class SysmonMatcher:
     def AnalysisQuery(self):
         """ Return the analysis query for the rule."""
         columns = self.getColumns()
-        columns.append(quote(self.detection) + " AS Detection")
+        columns.insert(0, quote(self.detection) + " AS Detection")
 
         name = AsName(self.detection)
 
@@ -321,7 +325,6 @@ WHERE %s """ % (name, ",\n       ".join(columns),
             handler = getattr(self, t)
         except AttributeError:
             #import pdb; pdb.set_trace()
-            Debug("No handler for %s" % t)
             raise UnknownField(t)
 
         return handler(ast)
@@ -391,8 +394,8 @@ WHERE %s """ % (name, ",\n       ".join(columns),
             try:
                 i = self.Visit(term)
             except UnknownField as e:
-                Debug("Skipping OR term for unsupported field " + e.key)
-                raise UnknownField(term)
+                #Debug("Skipping OR term for unsupported field " + e.key)
+                raise UnknownField(e.key)
 
             value.append(i)
 

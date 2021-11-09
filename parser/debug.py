@@ -1,4 +1,6 @@
 
+DEBUG = 0
+
 def Debug(x):
-    return
-    print(x)
+    if DEBUG:
+        print(x)
