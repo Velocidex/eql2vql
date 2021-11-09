@@ -50,6 +50,9 @@ sources:
 
     LET ProcessInfo = generate(name="ProcessInfo", query={
        SELECT *,
+              basename(path=EventData.ParentImage) AS ParentImageBase,
+              basename(path=EventData.Image) AS ImageBase,
+              commandline_split(command=EventData.CommandLine) AS CommandArgs,
               get(item=ProcessTypes, field=str(str=System.EventID.Value)) AS event_type
        FROM SysmonGenerator
        WHERE System.EventID.Value in (1, 5)
@@ -67,10 +70,10 @@ sources:
            'ImageLoad via Windows Update Auto Update Client' AS Detection
     FROM ProcessInfo
     WHERE  ( event_type IN ('start', 'process_started' ) 
-      AND  ( EventData.OriginalFileName = 'wuauclt.exe' OR EventData.Image =~ 'wuauclt\\.exe' ) 
-      AND EventData.CommandLine =~ '/RunHandlerComServer'
-      AND EventData.CommandLine =~ '/UpdateDeploymentProvider'
-      AND EventData.CommandLine =~ 'C:\\\\Users\\\\.*\\.dll|C:\\\\ProgramData\\\\.*\\.dll|C:\\\\Windows\\\\Temp\\\\.*\\.dll|C:\\\\Windows\\\\Tasks\\\\.*\\.dll' )
+      AND  ( EventData.OriginalFileName = 'wuauclt.exe' OR ImageBase =~ '^wuauclt\\.exe$' ) 
+      AND CommandArgs =~ '^/RunHandlerComServer$'
+      AND CommandArgs =~ '^/UpdateDeploymentProvider$'
+      AND CommandArgs =~ '^C:\\\\Users\\\\.*\\.dll$|^C:\\\\ProgramData\\\\.*\\.dll$|^C:\\\\Windows\\\\Temp\\\\.*\\.dll$|^C:\\\\Windows\\\\Tasks\\\\.*\\.dll$' )
 
     SELECT * FROM _ImageLoadviaWindowsUpdateAutoUpdateClient
 

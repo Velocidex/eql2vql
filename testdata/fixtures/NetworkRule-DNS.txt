@@ -72,9 +72,9 @@ sources:
            'Connection to Commonly Abused Free SSL Certificate Providers' AS Detection
     FROM NetworkInfo
     WHERE  ( protocol = 'dns'
-      AND EventData.QueryName =~ '.*letsencrypt\\.org|.*\\.sslforfree\\.com|.*\\.zerossl\\.com|.*\\.freessl\\.org'
-      AND EventData.Image =~ 'C:\\\\Windows\\\\System32\\\\.*\\.exe|C:\\\\Windows\\\\System\\\\.*\\.exe|C:\\\\Windows\\\\SysWOW64\\\\.*\\.exe|C:\\\\Windows\\\\Microsoft\\.NET\\\\Framework.*\\\\.*\\.exe|C:\\\\Windows\\\\explorer\\.exe|C:\\\\ProgramData\\\\Microsoft\\\\Windows Defender\\\\.*\\\\MsMpEng\\.exe|C:\\\\Windows\\\\notepad\\.exe'
-      AND  NOT EventData.Image =~ 'svchost\\.exe|MicrosoftEdge.*\\.exe|msedge\\.exe' )
+      AND EventData.QueryName =~ '^.*letsencrypt\\.org$|^.*\\.sslforfree\\.com$|^.*\\.zerossl\\.com$|^.*\\.freessl\\.org$'
+      AND EventData.Image =~ '^C:\\\\Windows\\\\System32\\\\.*\\.exe$|^C:\\\\Windows\\\\System\\\\.*\\.exe$|^C:\\\\Windows\\\\SysWOW64\\\\.*\\.exe$|^C:\\\\Windows\\\\Microsoft\\.NET\\\\Framework.*\\\\.*\\.exe$|^C:\\\\Windows\\\\explorer\\.exe$|^C:\\\\ProgramData\\\\Microsoft\\\\Windows Defender\\\\.*\\\\MsMpEng\\.exe$|^C:\\\\Windows\\\\notepad\\.exe$'
+      AND  NOT ImageBase =~ '^svchost\\.exe$|^MicrosoftEdge.*\\.exe$|^msedge\\.exe$' )
 
     SELECT * FROM _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders
 
