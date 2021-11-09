@@ -1,4 +1,5 @@
 artifact = name: Windows.Sysmon.Detection
+type: CLIENT
 description: |
   Automated artifact for detection based on EQL.
 
@@ -63,13 +64,13 @@ sources:
       WHERE System.EventID.Value = 22
     })
 
-    LET _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders = SELECT EventData || UserData AS _EventData,
-           System AS _System,
-           EventData.UtcTime AS UtcTime,
-           EventData.QueryName AS QueryName,
-           EventData.Image AS Image,
+    LET _ConnectiontoCommonlyAbusedFreeSSLCertificateProviders = SELECT 'Connection to Commonly Abused Free SSL Certificate Providers' AS Detection,
            protocol,
-           'Connection to Commonly Abused Free SSL Certificate Providers' AS Detection
+           EventData.Image AS Image,
+           EventData.QueryName AS QueryName,
+           EventData.UtcTime AS UtcTime,
+           EventData || UserData AS _EventData,
+           System AS _System
     FROM NetworkInfo
     WHERE  ( protocol = 'dns'
       AND EventData.QueryName =~ '^.*letsencrypt\\.org$|^.*\\.sslforfree\\.com$|^.*\\.zerossl\\.com$|^.*\\.freessl\\.org$'
@@ -81,6 +82,11 @@ sources:
 
 output = [
  {
+  "Detection": "Connection to Commonly Abused Free SSL Certificate Providers",
+  "protocol": "dns",
+  "Image": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2009.7-0\\MsMpEng.exe",
+  "QueryName": "ocsp.int-x3.letsencrypt.org",
+  "UtcTime": "2020-10-22 05:54:24.257",
   "_EventData": {
    "@timestamp": "2020-10-22T01:54:25.416Z",
    "TimeCreated": "2020-10-22T01:54:25.416Z",
@@ -121,11 +127,6 @@ output = [
    "Security": {
     "UserID": ""
    }
-  },
-  "UtcTime": "2020-10-22 05:54:24.257",
-  "QueryName": "ocsp.int-x3.letsencrypt.org",
-  "Image": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2009.7-0\\MsMpEng.exe",
-  "protocol": "dns",
-  "Detection": "Connection to Commonly Abused Free SSL Certificate Providers"
+  }
  }
 ]

@@ -1,4 +1,5 @@
 artifact = name: Windows.Sysmon.Detection
+type: CLIENT
 description: |
   Automated artifact for detection based on EQL.
 
@@ -61,14 +62,14 @@ sources:
 
     LET ProcessTypes <= dict(`1`="start", `5`="stop")
 
-    LET _ServiceControlSpawnedviaScriptInterpreter = SELECT EventData || UserData AS _EventData,
-           System AS _System,
-           EventData.UtcTime AS UtcTime,
-           EventData.Image AS Image,
-           EventData.ParentImage AS ParentImage,
-           EventData.CommandLine AS CommandLine,
+    LET _ServiceControlSpawnedviaScriptInterpreter = SELECT 'Service Control Spawned via Script Interpreter' AS Detection,
            EventData.User AS User,
-           'Service Control Spawned via Script Interpreter' AS Detection
+           EventData.CommandLine AS CommandLine,
+           EventData.ParentImage AS ParentImage,
+           EventData.Image AS Image,
+           EventData.UtcTime AS UtcTime,
+           EventData || UserData AS _EventData,
+           System AS _System
     FROM ProcessInfo
     WHERE  ( event_type = 'start'
       AND  ( ImageBase =~ '^sc\\.exe$' OR EventData.OriginalFileName = 'sc.exe' ) 
@@ -81,6 +82,12 @@ sources:
 
 output = [
  {
+  "Detection": "Service Control Spawned via Script Interpreter",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "UtcTime": "2021-06-12 01:07:41.204",
   "_EventData": {
    "SourceName": "Microsoft-Windows-Sysmon",
    "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
@@ -135,15 +142,15 @@ output = [
    "Security": {
     "UserID": ""
    }
-  },
-  "UtcTime": "2021-06-12 01:07:41.204",
-  "Image": "C:\\Windows\\System32\\sc.exe",
-  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
-  "CommandLine": "sc  create tbbd05 binpath= \"%%COMSPEC%% echo /c b6a1458f396 \u003e \\\\.\\pipe\\334485\" DisplayName= \"tbbd05\" start= demand",
-  "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "Service Control Spawned via Script Interpreter"
+  }
  },
  {
+  "Detection": "Service Control Spawned via Script Interpreter",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "CommandLine": "sc  start tbbd05 ",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "UtcTime": "2021-06-12 01:07:41.224",
   "_EventData": {
    "SourceName": "Microsoft-Windows-Sysmon",
    "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
@@ -198,15 +205,15 @@ output = [
    "Security": {
     "UserID": ""
    }
-  },
-  "UtcTime": "2021-06-12 01:07:41.224",
-  "Image": "C:\\Windows\\System32\\sc.exe",
-  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
-  "CommandLine": "sc  start tbbd05 ",
-  "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "Service Control Spawned via Script Interpreter"
+  }
  },
  {
+  "Detection": "Service Control Spawned via Script Interpreter",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "CommandLine": "sc  stop tbbd05 ",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "UtcTime": "2021-06-12 01:07:41.348",
   "_EventData": {
    "SourceName": "Microsoft-Windows-Sysmon",
    "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
@@ -261,15 +268,15 @@ output = [
    "Security": {
     "UserID": ""
    }
-  },
-  "UtcTime": "2021-06-12 01:07:41.348",
-  "Image": "C:\\Windows\\System32\\sc.exe",
-  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
-  "CommandLine": "sc  stop tbbd05 ",
-  "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "Service Control Spawned via Script Interpreter"
+  }
  },
  {
+  "Detection": "Service Control Spawned via Script Interpreter",
+  "User": "WORKSTATION5\\APT-Simulator",
+  "CommandLine": "sc  delete tbbd05 ",
+  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+  "Image": "C:\\Windows\\System32\\sc.exe",
+  "UtcTime": "2021-06-12 01:07:41.363",
   "_EventData": {
    "SourceName": "Microsoft-Windows-Sysmon",
    "ProviderGuid": "{5770385f-c22a-43e0-bf4c-06f5698ffbd9}",
@@ -324,12 +331,6 @@ output = [
    "Security": {
     "UserID": ""
    }
-  },
-  "UtcTime": "2021-06-12 01:07:41.363",
-  "Image": "C:\\Windows\\System32\\sc.exe",
-  "ParentImage": "C:\\Windows\\System32\\cmd.exe",
-  "CommandLine": "sc  delete tbbd05 ",
-  "User": "WORKSTATION5\\APT-Simulator",
-  "Detection": "Service Control Spawned via Script Interpreter"
+  }
  }
 ]

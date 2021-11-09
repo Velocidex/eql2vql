@@ -1,4 +1,5 @@
 artifact = name: Windows.Sysmon.Detection
+type: CLIENT
 description: |
   Automated artifact for detection based on EQL.
 
@@ -42,14 +43,14 @@ sources:
       WHERE System.EventID.Value in (12, 13, 14)
     })
 
-    LET _PrivilegeEscalationviaWindirEnvironmentVariable = SELECT EventData || UserData AS _EventData,
-           System AS _System,
-           EventData.UtcTime AS UtcTime,
-           EventData.EventType AS EventType,
-           EventData.Image AS Image,
-           EventData.TargetObject AS TargetObject,
+    LET _PrivilegeEscalationviaWindirEnvironmentVariable = SELECT 'Privilege Escalation via Windir Environment Variable' AS Detection,
            EventData.Details AS Details,
-           'Privilege Escalation via Windir Environment Variable' AS Detection
+           EventData.TargetObject AS TargetObject,
+           EventData.Image AS Image,
+           EventData.EventType AS EventType,
+           EventData.UtcTime AS UtcTime,
+           EventData || UserData AS _EventData,
+           System AS _System
     FROM RegInfo
     WHERE NormalizedTargetObject =~ '^HKEY_USERS\\\\.*\\\\Environment\\\\windir$|^HKEY_USERS\\\\.*\\\\Environment\\\\systemroot$'
 
@@ -58,6 +59,12 @@ sources:
 
 output = [
  {
+  "Detection": "Privilege Escalation via Windir Environment Variable",
+  "Details": "\"C:\\Windows\\system32\\cmd.exe\"",
+  "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+  "Image": "C:\\Windows\\explorer.exe",
+  "EventType": "SetValue",
+  "UtcTime": "2019-08-03 09:46:48.692",
   "_EventData": {
    "RuleName": "PrivEsc - UAC bypass UACME-34",
    "EventType": "SetValue",
@@ -95,15 +102,15 @@ output = [
    "Security": {
     "UserID": "S-1-5-18"
    }
-  },
-  "UtcTime": "2019-08-03 09:46:48.692",
-  "EventType": "SetValue",
-  "Image": "C:\\Windows\\explorer.exe",
-  "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
-  "Details": "\"C:\\Windows\\system32\\cmd.exe\"",
-  "Detection": "Privilege Escalation via Windir Environment Variable"
+  }
  },
  {
+  "Detection": "Privilege Escalation via Windir Environment Variable",
+  "Details": null,
+  "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
+  "Image": "C:\\Windows\\explorer.exe",
+  "EventType": "DeleteValue",
+  "UtcTime": "2019-08-03 09:46:49.347",
   "_EventData": {
    "RuleName": "PrivEsc - UAC bypass UACME-34",
    "EventType": "DeleteValue",
@@ -140,12 +147,6 @@ output = [
    "Security": {
     "UserID": "S-1-5-18"
    }
-  },
-  "UtcTime": "2019-08-03 09:46:49.347",
-  "EventType": "DeleteValue",
-  "Image": "C:\\Windows\\explorer.exe",
-  "TargetObject": "HKU\\S-1-5-21-3461203602-4096304019-2269080069-1000\\Environment\\windir",
-  "Details": null,
-  "Detection": "Privilege Escalation via Windir Environment Variable"
+  }
  }
 ]

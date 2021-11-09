@@ -24,6 +24,7 @@ class BaseProvider(object):
     name = "Generic.EQLProvider"
     parameters = []
     analyzers = []
+    type = "CLIENT"
 
     def __init__(self, analyzers):
         self.analyzers = analyzers
