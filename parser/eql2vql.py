@@ -13,6 +13,15 @@ import debug
 
 from debug import Debug
 
+class InvalidFileException(Exception):
+    def __init__(self, filename, e):
+        self.filename = filename
+        self.e = e
+
+    def __str__(self):
+        return "Unable to parse %s: %s " % (self.filename, self.e)
+
+
 parser = argparse.ArgumentParser(
     description='Convert EQL detection rules to a VQL artifact.')
 
@@ -39,7 +48,11 @@ parser.add_argument('--exclude_regex',
 
 def GetAnalyzer(filename, exclude_regex):
     with open(filename) as fd:
-        description = toml.loads(fd.read())
+        try:
+            description = toml.loads(fd.read())
+        except Exception as e:
+            raise InvalidFileException(filename, e)
+
         query = description["rule"]["query"]
         name = description["rule"]["name"]
         if exclude_regex and exclude_regex.search(name):
@@ -76,8 +89,11 @@ def BuildArtifact(
             if sysmon_engine:
                 analyzers.append(sysmon_engine)
         except Exception as e:
-#            import pdb; pdb.set_trace()
             Debug("Unable to load %s: %s" % (f, e))
+
+    if not analyzers:
+        Debug("No valid EQL rules loaded")
+        return ""
 
     p = provider(analyzers)
     artifact = p.Render()
